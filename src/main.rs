@@ -1,31 +1,52 @@
 use std::env;
-use std::process::ExitCode;
+use std::fs;
+use std::io;
 
-fn main() -> ExitCode {
+type InterpreterResult = io::Result<()>;
+
+fn main() -> InterpreterResult {
     let mut args: Vec<String> = env::args().collect();
     println!("{:?}", args);
 
-    // hack for running with cargo defaults
+    // hack for running with cargo default args
     if args.len() >= 1 && args[0] == "target/debug/siskin" {
         args.remove(0);
     }
 
     if args.len() > 1 {
         println!("Usage: siskin [script]");
-        return ExitCode::from(64);
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Too many input arguments",
+        ))
     } else if args.len() == 1 {
-        run_file(&args[0]);
+        run_file(&args[0])
     } else {
-        run_prompt();
+        run_prompt()
     }
-
-    return ExitCode::SUCCESS;
 }
 
-fn run_file(path: &str) {
+fn run_file(path: &str) -> InterpreterResult {
     println!("Running file: {path}");
+    let contents = fs::read_to_string(path)?;
+    run(&contents)?;
+    Ok(())
 }
 
-fn run_prompt() {
+fn run_prompt() -> InterpreterResult {
     println!("Welcome to interactive prompt.");
+
+    let mut buffer = String::new();
+    let stdin = io::stdin();
+
+    loop {
+        stdin.read_line(&mut buffer)?;
+        run(&buffer)?;
+        buffer.clear();
+    }
+}
+
+fn run(code: &str) -> InterpreterResult {
+    println!("running code: {code}");
+    Ok(())
 }
