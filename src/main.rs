@@ -1,3 +1,7 @@
+mod scanner;
+
+use crate::scanner::scan;
+
 use std::env;
 use std::fs;
 use std::io;
@@ -48,5 +52,8 @@ fn run_prompt() -> InterpreterResult {
 
 fn run(code: &str) -> InterpreterResult {
     println!("running code: {code}");
+
+    scan(code);
+
     Ok(())
 }
