@@ -1,6 +1,6 @@
 mod scanner;
 
-use crate::scanner::scan;
+use crate::scanner::scan_tokens;
 
 use std::env;
 use std::fs;
@@ -53,7 +53,11 @@ fn run_prompt() -> InterpreterResult {
 fn run(code: &str) -> InterpreterResult {
     println!("running code: {code}");
 
-    scan(code);
+    let tokens = scan_tokens(code);
+
+    for token in tokens {
+        println!("{0}", token.lexeme);
+    }
 
     Ok(())
 }
