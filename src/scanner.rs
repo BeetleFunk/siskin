@@ -3,15 +3,14 @@ pub fn scan_tokens(code: &str) -> Vec<Token> {
 
     println!("scanned {code}");
 
-    let scanner = Scanner {
-        code,
+    let mut scanner = Scanner {
+        chars: code.chars().collect(),
         cursor_begin: 0,
         cursor_end: 0,
         line: 1,
     };
 
     let mut eof = false;
-
     while !eof {
         let token = scanner.next_token();
 
@@ -19,26 +18,34 @@ pub fn scan_tokens(code: &str) -> Vec<Token> {
             eof = true;
         }
 
-        tokens.push(scanner.next_token());
+        tokens.push(token);
     }
 
-    tokens
+    return tokens;
 }
 
 #[derive(Debug)]
-struct Scanner<'a> {
-    code: &'a str,
-    cursor_begin: u32,
-    cursor_end: u32,
+struct Scanner {
+    chars: Vec<char>,
+    cursor_begin: usize,
+    cursor_end: usize,
     line: u32,
 }
 
-impl<'a> Scanner<'a> {
-    fn next_token(&self) -> Token<'a> {
-        Token {
-            token_type: TokenType::EOF,
-            lexeme: "fake1".to_string(),
-            line: 6,
+impl Scanner {
+    fn next_token<'a>(&mut self) -> Token<'a> {
+        // TODO: bounds check
+        let current = self.chars[self.cursor_begin];
+
+        self.line += 1;
+
+        match current {
+            '(' => Token {
+                token_type: TokenType::LeftParen,
+                lexeme: String::from(current),
+                line: self.line,
+            },
+            _ => panic!("boom"),
         }
     }
 }
