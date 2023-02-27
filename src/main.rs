@@ -56,7 +56,7 @@ fn run(code: &str) -> InterpreterResult {
     let tokens = scan_tokens(code);
 
     for token in tokens {
-        println!("{0}", token.lexeme);
+        println!("{0}, {1}", token.lexeme, token.line);
     }
 
     Ok(())

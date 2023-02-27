@@ -34,18 +34,36 @@ struct Scanner {
 
 impl Scanner {
     fn next_token<'a>(&mut self) -> Token<'a> {
-        // TODO: bounds check
+        // move to the next character
+        self.cursor_begin = self.cursor_end;
+        self.cursor_end += 1;
+
+        if self.cursor_begin >= self.chars.len() {
+            return Token {
+                token_type: TokenType::EOF,
+                lexeme: String::from(""),
+                line: self.line,
+            };
+        }
+
         let current = self.chars[self.cursor_begin];
 
-        self.line += 1;
+        println!("scanning char {0}", current);
 
         match current {
-            '(' => Token {
-                token_type: TokenType::LeftParen,
-                lexeme: String::from(current),
-                line: self.line,
-            },
+            '(' => self.token_at_cursor(TokenType::LeftParen),
+            ')' => self.token_at_cursor(TokenType::RightParen),
+            '\n' => { self.line += 1; return self.next_token() }
             _ => panic!("boom"),
+        }
+    }
+
+    fn token_at_cursor<'a>(&self, token_type: TokenType<'a>) -> Token<'a> {
+        let lexeme_chars = &self.chars[self.cursor_begin..self.cursor_end];
+        Token {
+            token_type,
+            lexeme: String::from_iter(lexeme_chars.iter()),
+            line: self.line,
         }
     }
 }
