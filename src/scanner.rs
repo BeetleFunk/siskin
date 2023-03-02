@@ -59,9 +59,11 @@ impl Cursor {
         }
     }
 
+    // increment the end of the cursor until the condition is met or the end of the Vec is reached
+    // buffer will not include the char for which the condition is true
     fn buffer_next_until(&mut self, condition: impl Fn(char) -> bool) {
         let negation = |next| !condition(next);
-        while self.buffer_next_if_true(negation) {};
+        while self.buffer_next_if_true(negation) {}
     }
 
     fn buffer_next_if_match(&mut self, c: char) -> bool {
@@ -74,7 +76,7 @@ impl Cursor {
     }
 }
 
-fn next_token<'a>(cursor: &mut Cursor) -> Token<'a> {
+fn next_token(cursor: &mut Cursor) -> Token {
     if let Some(current) = cursor.take() {
         println!("scanning char {0}", current);
 
@@ -132,6 +134,21 @@ fn next_token<'a>(cursor: &mut Cursor) -> Token<'a> {
                 cursor.line += 1;
                 next_token(cursor)
             }
+            '"' => {
+                cursor.buffer_next_until(|next| next == '"');
+                if cursor.buffer_next_if_match('"') {
+                    let quoted = cursor.string_at_cursor();
+                    // TODO remove quotes
+                    // TODO increment line count if newlines within string
+                    Token {
+                        token_type: TokenType::String(quoted.clone()),
+                        lexeme: quoted,
+                        line: cursor.line,
+                    }
+                } else {
+                    panic!("Unterminated string at line {0}", cursor.line)
+                }
+            }
             _ => panic!("Unexpected character"),
         }
     } else {
@@ -143,7 +160,7 @@ fn next_token<'a>(cursor: &mut Cursor) -> Token<'a> {
     }
 }
 
-fn token_at_cursor<'a>(cursor: &Cursor, token_type: TokenType<'a>) -> Token<'a> {
+fn token_at_cursor<'a>(cursor: &Cursor, token_type: TokenType) -> Token {
     Token {
         token_type,
         lexeme: cursor.string_at_cursor(),
@@ -152,14 +169,14 @@ fn token_at_cursor<'a>(cursor: &Cursor, token_type: TokenType<'a>) -> Token<'a> 
 }
 
 #[derive(Debug)]
-pub struct Token<'a> {
-    pub token_type: TokenType<'a>,
+pub struct Token {
+    pub token_type: TokenType,
     pub lexeme: String,
     pub line: u32,
 }
 
 #[derive(Debug)]
-pub enum TokenType<'a> {
+pub enum TokenType {
     // Single-character tokens.
     LeftParen,
     RightParen,
@@ -184,8 +201,8 @@ pub enum TokenType<'a> {
     LessEqual,
 
     // Literals.
-    Identifier(&'a str),
-    String(&'a str),
+    Identifier(String),
+    String(String),
     Number(f64),
 
     // Keywords.
