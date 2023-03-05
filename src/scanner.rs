@@ -1,23 +1,76 @@
 pub fn scan_tokens(code: &str) -> Vec<Token> {
     let mut tokens: Vec<Token> = vec![];
 
-    println!("scanned {code}");
-
     let code_chars: Vec<char> = code.chars().collect();
     let mut cursor = Cursor::new(code_chars);
 
-    let mut eof = false;
-    while !eof {
+    loop {
         let token = next_token(&mut cursor);
-
-        if let TokenType::EOF = token.token_type {
-            eof = true;
-        }
-
         tokens.push(token);
-    }
 
-    return tokens;
+        if matches!(tokens.last().unwrap().token_type, TokenType::EOF) {
+            break tokens
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Token {
+    pub token_type: TokenType,
+    pub lexeme: String,
+    pub line: u32,
+}
+
+#[derive(Debug)]
+pub enum TokenType {
+    // Single-character tokens.
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    Comma,
+    Dot,
+    Minus,
+    Plus,
+    Semicolon,
+    Slash,
+    Star,
+
+    // One or two character tokens.
+    Bang,
+    BangEqual,
+    Equal,
+    EqualEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+
+    // Literals.
+    Identifier(String),
+    String(String),
+    Number(f64),
+
+    // Keywords.
+    And,
+    Class,
+    Else,
+    False,
+    Fun,
+    For,
+    If,
+    Nil,
+    Or,
+    Print,
+    Return,
+    Super,
+    This,
+    True,
+    Var,
+    While,
+
+    // End-Of-File
+    EOF,
 }
 
 #[derive(Debug)]
@@ -49,7 +102,7 @@ impl Cursor {
         }
     }
 
-    // increment the end of the cursor if condition is met
+    // increment the end of the cursor if the condition is met and the index is not at the end of the Vec
     fn buffer_next_if_true(&mut self, condition: impl Fn(char) -> bool) -> bool {
         if self.end < self.code.len() && condition(self.code[self.end]) {
             self.end += 1;
@@ -59,15 +112,15 @@ impl Cursor {
         }
     }
 
+    fn buffer_next_if_match(&mut self, c: char) -> bool {
+        self.buffer_next_if_true(|next| next == c)
+    }
+
     // increment the end of the cursor until the condition is met or the end of the Vec is reached
     // buffer will not include the char for which the condition is true
     fn buffer_next_until(&mut self, condition: impl Fn(char) -> bool) {
         let negation = |next| !condition(next);
         while self.buffer_next_if_true(negation) {}
-    }
-
-    fn buffer_next_if_match(&mut self, c: char) -> bool {
-        self.buffer_next_if_true(|next| next == c)
     }
 
     fn string_at_cursor(&self) -> String {
@@ -78,8 +131,6 @@ impl Cursor {
 
 fn next_token(cursor: &mut Cursor) -> Token {
     if let Some(current) = cursor.take() {
-        println!("scanning char {0}", current);
-
         match current {
             '(' => token_at_cursor(cursor, TokenType::LeftParen),
             ')' => token_at_cursor(cursor, TokenType::RightParen),
@@ -149,7 +200,15 @@ fn next_token(cursor: &mut Cursor) -> Token {
                     panic!("Unterminated string at line {0}", cursor.line)
                 }
             }
-            _ => panic!("Unexpected character"),
+            _ => {
+                if current.is_alphabetic() {
+                    scan_identifier(cursor)
+                } else if current.is_digit(10) {
+                    scan_number(cursor)
+                } else {
+                    panic!("Unexpected character at line {0}", cursor.line)
+                }
+            }
         }
     } else {
         Token {
@@ -160,7 +219,7 @@ fn next_token(cursor: &mut Cursor) -> Token {
     }
 }
 
-fn token_at_cursor<'a>(cursor: &Cursor, token_type: TokenType) -> Token {
+fn token_at_cursor(cursor: &Cursor, token_type: TokenType) -> Token {
     Token {
         token_type,
         lexeme: cursor.string_at_cursor(),
@@ -168,60 +227,62 @@ fn token_at_cursor<'a>(cursor: &Cursor, token_type: TokenType) -> Token {
     }
 }
 
-#[derive(Debug)]
-pub struct Token {
-    pub token_type: TokenType,
-    pub lexeme: String,
-    pub line: u32,
+fn scan_identifier(cursor: &mut Cursor) -> Token {
+    cursor.buffer_next_until(|next| !next.is_alphanumeric());
+    let lexeme = cursor.string_at_cursor();
+
+    let token_type = if let Some(keyword) = to_keyword(&lexeme) {
+        keyword
+    } else {
+        TokenType::Identifier(lexeme.clone())
+    };
+
+    Token {
+        token_type,
+        lexeme,
+        line: cursor.line,
+    }
 }
 
-#[derive(Debug)]
-pub enum TokenType {
-    // Single-character tokens.
-    LeftParen,
-    RightParen,
-    LeftBrace,
-    RightBrace,
-    Comma,
-    Dot,
-    Minus,
-    Plus,
-    Semicolon,
-    Slash,
-    Star,
+fn scan_number(cursor: &mut Cursor) -> Token {
+    let is_not_digit = |next: char| !next.is_digit(10);
+    cursor.buffer_next_until(is_not_digit);
 
-    // One or two character tokens.
-    Bang,
-    BangEqual,
-    Equal,
-    EqualEqual,
-    Greater,
-    GreaterEqual,
-    Less,
-    LessEqual,
+    // pickup fractional part if necessary
+    if cursor.buffer_next_if_match('.') {
+        cursor.buffer_next_until(is_not_digit);
+    }
 
-    // Literals.
-    Identifier(String),
-    String(String),
-    Number(f64),
+    let lexeme = cursor.string_at_cursor();
 
-    // Keywords.
-    And,
-    Class,
-    Else,
-    False,
-    Fun,
-    For,
-    If,
-    Nil,
-    Or,
-    Print,
-    Return,
-    Super,
-    This,
-    True,
-    Var,
-    While,
+    // TODO return result with error
+    let number: f64 = lexeme.parse().unwrap();
 
-    EOF,
+    Token {
+        token_type: TokenType::Number(number),
+        lexeme: lexeme,
+        line: cursor.line,
+    }
+}
+
+fn to_keyword(identifier: &str) -> Option<TokenType> {
+    match identifier {
+        "and" => Option::Some(TokenType::And),
+        "class" => Option::Some(TokenType::Class),
+        "else" => Option::Some(TokenType::Else),
+        "false" => Option::Some(TokenType::False),
+        "for" => Option::Some(TokenType::For),
+        "fun" => Option::Some(TokenType::Fun),
+        "if" => Option::Some(TokenType::If),
+        "nil" => Option::Some(TokenType::Nil),
+        "or" => Option::Some(TokenType::Or),
+        "print" => Option::Some(TokenType::Print),
+        "return" => Option::Some(TokenType::Return),
+        "super" => Option::Some(TokenType::Super),
+        "this" => Option::Some(TokenType::This),
+        "true" => Option::Some(TokenType::True),
+        "var" => Option::Some(TokenType::Var),
+        "while" => Option::Some(TokenType::While),
+        _ => Option::None,
+    }
 }
