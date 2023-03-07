@@ -1,5 +1,8 @@
+mod expr;
 mod scanner;
 
+use crate::expr::Expr;
+use crate::expr::print_ast;
 use crate::scanner::scan_tokens;
 
 use std::env;
@@ -56,8 +59,13 @@ fn run(code: &str) -> InterpreterResult {
     let tokens = scan_tokens(code);
 
     for token in tokens {
-        println!("{0}, {1}", token.lexeme, token.line);
+        println!("{:?}", token);
+        
+        // TODO: construct Expr from tokens
+        println!("{}", print_ast(&Expr::Literal {value: token} ))
     }
+
+    
 
     Ok(())
 }

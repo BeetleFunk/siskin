@@ -189,10 +189,10 @@ fn next_token(cursor: &mut Cursor) -> Token {
                 cursor.buffer_next_until(|next| next == '"');
                 if cursor.buffer_next_if_match('"') {
                     let quoted = cursor.string_at_cursor();
-                    // TODO remove quotes
                     // TODO increment line count if newlines within string
                     Token {
-                        token_type: TokenType::String(quoted.clone()),
+                        // lexeme bounded by quote chars so this slice should never panic
+                        token_type: TokenType::String(quoted[1..quoted.len()-1].to_string()),
                         lexeme: quoted,
                         line: cursor.line,
                     }
