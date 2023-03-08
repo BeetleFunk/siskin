@@ -14,14 +14,14 @@ pub fn scan_tokens(code: &str) -> Vec<Token> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub line: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     // Single-character tokens.
     LeftParen,

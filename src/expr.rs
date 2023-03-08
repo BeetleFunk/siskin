@@ -15,8 +15,8 @@ pub enum Expr {
         expression: Box<Expr>,
     },
     Literal {
-        value: Token,
-    }, // TODO: use token or create literal enum specifically for Expr?
+        value: Token, // TODO: use token or create literal enum specifically for Expr?
+    },
     Unary {
         operator: Token,
         right: Box<Expr>,
@@ -37,7 +37,11 @@ fn format_expr(expr: &Expr, output: &mut String) {
         Expr::Assign { name, value } => {
             format_subexpr(&name.lexeme, value, output);
         }
-        Expr::Binary { left, operator, right } => {
+        Expr::Binary {
+            left,
+            operator,
+            right,
+        } => {
             format_subexprs(&operator.lexeme, left, right, output);
         }
         Expr::Grouping { expression } => {
