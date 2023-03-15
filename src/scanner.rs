@@ -1,5 +1,5 @@
 pub fn scan_tokens(code: &str) -> Vec<Token> {
-    let mut tokens: Vec<Token> = vec![];
+    let mut tokens: Vec<Token> = Vec::new();
 
     let code_chars: Vec<char> = code.chars().collect();
     let mut cursor = Cursor::new(code_chars);

@@ -68,7 +68,7 @@ fn run(code: &str) -> InterpreterResult {
         println!(
             "{}",
             print_ast(&Expr::Literal {
-                value: token.clone()
+                value: expr::LiteralValue::Boolean(true)
             })
         )
     }

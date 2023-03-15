@@ -1,4 +1,7 @@
 use crate::scanner::Token;
+use crate::scanner::TokenType;
+
+use std::fmt;
 
 #[derive(Debug)]
 pub enum Expr {
@@ -15,7 +18,7 @@ pub enum Expr {
         expression: Box<Expr>,
     },
     Literal {
-        value: Token, // TODO: use token or create literal enum specifically for Expr?
+        value: LiteralValue,
     },
     Unary {
         operator: Token,
@@ -24,6 +27,39 @@ pub enum Expr {
     Variable {
         name: Token,
     },
+}
+
+#[derive(Debug)]
+pub enum LiteralValue {
+    Boolean(bool),
+    Nil,
+    Number(f64),
+    String(String),
+}
+
+impl fmt::Display for LiteralValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            Self::Boolean(value) => value.to_string(),
+            Self::Nil => "nil".to_string(),
+            Self::Number(value) => value.to_string(),
+            Self::String(value) => value.to_string(),
+        })
+    }
+}
+
+// TODO: switch to TryFrom with proper error handling
+impl From<&Token> for LiteralValue {
+    fn from(token: &Token) -> LiteralValue {
+        match &token.token_type {
+            TokenType::False => LiteralValue::Boolean(false),
+            TokenType::True => LiteralValue::Boolean(true),
+            TokenType::Nil => LiteralValue::Nil,
+            TokenType::Number(value) => LiteralValue::Number(*value),
+            TokenType::String(value) => LiteralValue::String(value.clone()),
+            _ => panic!("Cannot make literal value from non-literal token")
+        }
+    }
 }
 
 pub fn print_ast(root: &Expr) -> String {
@@ -48,7 +84,7 @@ fn format_expr(expr: &Expr, output: &mut String) {
             format_subexpr("group", expression, output);
         }
         Expr::Literal { value } => {
-            output.push_str(&value.lexeme);
+            output.push_str(&value.to_string());
         }
         Expr::Unary { operator, right } => {
             format_subexpr(&operator.lexeme, right, output);

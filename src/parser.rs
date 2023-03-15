@@ -1,4 +1,5 @@
 use crate::expr::Expr;
+use crate::expr::LiteralValue;
 use crate::scanner::Token;
 use crate::scanner::TokenType;
 use crate::stmt::Stmt;
@@ -34,7 +35,8 @@ fn var_declaration(cursor: &mut TokenCursor) -> Stmt {
     let initializer = if cursor.advance_if_match(&TokenType::Equal).is_some() {
         expression(cursor)
     } else {
-        Expr::Literal { value: Token { token_type: TokenType::Nil, lexeme: "".to_string(), line: 0} }
+        // uninitialized variables default to nil
+        Expr::Literal { value: LiteralValue::Nil }
     };
 
     cursor.advance_if_match(&TokenType::Semicolon).expect("Expect ';' after variable declaration.");
@@ -164,11 +166,15 @@ fn primary(cursor: &mut TokenCursor) -> Expr {
         | TokenType::True
         | TokenType::Nil
         | TokenType::Number(_)
-        | TokenType::String(_)
-        | TokenType::Identifier(_) => {
-            let value = current.clone();
+        | TokenType::String(_) => {
+            let literal = Expr::Literal { value: LiteralValue::from(current) };
             cursor.advance();
-            Expr::Literal { value }
+            literal
+        }
+        TokenType::Identifier(_) => {
+            let name = current.clone();
+            cursor.advance();
+            Expr::Variable { name }
         }
         TokenType::LeftParen => {
             cursor.advance();
