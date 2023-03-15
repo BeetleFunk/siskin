@@ -1,6 +1,7 @@
 mod expr;
 mod parser;
 mod scanner;
+mod stmt;
 
 use crate::expr::print_ast;
 use crate::expr::Expr;
