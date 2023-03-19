@@ -1,10 +1,10 @@
 mod expr;
+mod interpreter;
 mod parser;
 mod scanner;
 mod stmt;
 
-use crate::expr::print_ast;
-use crate::expr::Expr;
+use crate::interpreter::Environment;
 use crate::parser::parse;
 use crate::scanner::scan_tokens;
 
@@ -39,7 +39,8 @@ fn main() -> InterpreterResult {
 fn run_file(path: &str) -> InterpreterResult {
     println!("Running file: {path}");
     let contents = fs::read_to_string(path)?;
-    run(&contents)?;
+    let mut env = Environment { stuff: "boom".to_string() };
+    run(&contents, &mut env)?;
     Ok(())
 }
 
@@ -48,32 +49,21 @@ fn run_prompt() -> InterpreterResult {
 
     let mut buffer = String::new();
     let stdin = io::stdin();
+    let mut env = Environment { stuff: "boom".to_string() };
 
     loop {
         stdin.read_line(&mut buffer)?;
-        run(&buffer)?;
+        run(&buffer, &mut env)?;
         buffer.clear();
     }
 }
 
-fn run(code: &str) -> InterpreterResult {
+fn run(code: &str, env: &mut Environment) -> InterpreterResult {
     println!("running code: {code}");
 
     let tokens = scan_tokens(code);
-
-    for token in &tokens {
-        println!("{:?}", token);
-
-        // TODO: construct Expr from tokens
-        println!(
-            "{}",
-            print_ast(&Expr::Literal {
-                value: expr::LiteralValue::Boolean(true)
-            })
-        )
-    }
-
-    parse(&tokens);
+    let statements = parse(&tokens);
+    interpreter::execute(&statements, env);
 
     Ok(())
 }

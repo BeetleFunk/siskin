@@ -29,7 +29,7 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
     Boolean(bool),
     Nil,
