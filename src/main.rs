@@ -39,7 +39,7 @@ fn main() -> InterpreterResult {
 fn run_file(path: &str) -> InterpreterResult {
     println!("Running file: {path}");
     let contents = fs::read_to_string(path)?;
-    let mut env = Environment { stuff: "boom".to_string() };
+    let mut env = Environment::new();
     run(&contents, &mut env)?;
     Ok(())
 }
@@ -49,7 +49,7 @@ fn run_prompt() -> InterpreterResult {
 
     let mut buffer = String::new();
     let stdin = io::stdin();
-    let mut env = Environment { stuff: "boom".to_string() };
+    let mut env = Environment::new();
 
     loop {
         stdin.read_line(&mut buffer)?;
