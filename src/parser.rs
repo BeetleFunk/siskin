@@ -1,79 +1,102 @@
+use crate::error::BasicError;
+use crate::error::GenericResult;
 use crate::expr::Expr;
 use crate::expr::LiteralValue;
 use crate::scanner::Token;
 use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
-pub fn parse(tokens: &Vec<Token>) -> Vec<Stmt> {
+type StmtResult = GenericResult<Stmt>;
+
+pub fn parse(tokens: &Vec<Token>) -> GenericResult<Vec<Stmt>> {
     let mut cursor = TokenCursor::new(tokens);
     let mut statements = Vec::new();
 
     while !cursor.at_end() {
-        statements.push(declaration(&mut cursor));
+        statements.push(declaration(&mut cursor)?);
     }
 
-    statements
+    Ok(statements)
 }
 
-fn declaration(cursor: &mut TokenCursor) -> Stmt {
+fn declaration(cursor: &mut TokenCursor) -> StmtResult {
     match cursor.peek().token_type {
-        TokenType::Var => { var_declaration(cursor) }
-        _ => statement(cursor)
+        TokenType::Var => var_declaration(cursor),
+        _ => statement(cursor),
     }
 }
 
-fn var_declaration(cursor: &mut TokenCursor) -> Stmt {
-    cursor.advance_if_match(&TokenType::Var).expect("Parsing var declaration with invalid token");
+fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
+    // Convert all these
+    cursor
+        .advance_if_match(&TokenType::Var)
+        .ok_or_else(|| BasicError::new("Parsing var declaration with invalid token"))?;
 
     // TODO: this can be cleaner after literal restructuring
     let current = cursor.peek();
     let name = match current.token_type {
-        TokenType::Identifier(_) => current.clone(),
-        _ => panic!("Expect variable name.")
+        TokenType::Identifier(_) => {
+            let clone = current.clone();
+            cursor.advance();
+            clone
+        }
+        _ => panic!("Expect variable name."),
     };
 
     let initializer = if cursor.advance_if_match(&TokenType::Equal).is_some() {
         expression(cursor)
     } else {
         // uninitialized variables default to nil
-        Expr::Literal { value: LiteralValue::Nil }
+        Expr::Literal {
+            value: LiteralValue::Nil,
+        }
     };
 
-    cursor.advance_if_match(&TokenType::Semicolon).expect("Expect ';' after variable declaration.");
+    cursor
+        .advance_if_match(&TokenType::Semicolon)
+        .expect("Expect ';' after variable declaration.");
 
-    Stmt::Var { name, initializer }
+    Ok(Stmt::Var { name, initializer })
 }
 
-fn statement(cursor: &mut TokenCursor) -> Stmt {
+fn statement(cursor: &mut TokenCursor) -> StmtResult {
     match cursor.peek().token_type {
-        TokenType::Print => { print_statement(cursor) }
-        TokenType::LeftBrace => { block_statement(cursor) }
-        _ => expression_statement(cursor)
+        TokenType::Print => print_statement(cursor),
+        TokenType::LeftBrace => block_statement(cursor),
+        _ => expression_statement(cursor),
     }
 }
 
-fn print_statement(cursor: &mut TokenCursor) -> Stmt {
-    cursor.advance_if_match(&TokenType::Print).expect("Parsing print statement with invalid token");
+fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
+    cursor
+        .advance_if_match(&TokenType::Print)
+        .expect("Parsing print statement with invalid token");
     let expression = expression(cursor);
-    cursor.advance_if_match(&TokenType::Semicolon).expect("Expect ';' after expression.");
-    Stmt::Print { expression }
+    cursor
+        .advance_if_match(&TokenType::Semicolon)
+        .expect("Expect ';' after expression.");
+    Ok(Stmt::Print { expression })
 }
 
-fn expression_statement(cursor: &mut TokenCursor) -> Stmt {
+fn expression_statement(cursor: &mut TokenCursor) -> StmtResult {
     let expression = expression(cursor);
-    cursor.advance_if_match(&TokenType::Semicolon).expect("Expect ';' after expression.");
-    Stmt::Expression { expression }
+    cursor
+        .advance_if_match(&TokenType::Semicolon)
+        .expect("Expect ';' after expression.");
+    Ok(Stmt::Expression { expression })
 }
 
-fn block_statement(cursor: &mut TokenCursor) -> Stmt {
-    cursor.advance_if_match(&TokenType::LeftBrace).expect("Parsing block statement with invalid token");
+fn block_statement(cursor: &mut TokenCursor) -> StmtResult {
+    cursor
+        .advance_if_match(&TokenType::LeftBrace)
+        .expect("Parsing block statement with invalid token");
 
     let mut statements = Vec::new();
     while cursor.advance_if_match(&TokenType::RightBrace).is_none() {
-        statements.push(declaration(cursor))
+        statements.push(declaration(cursor)?)
     }
 
-    Stmt::Block { statements }
+    Ok(Stmt::Block { statements })
 }
 
 fn expression(cursor: &mut TokenCursor) -> Expr {
@@ -85,12 +108,17 @@ fn assignment(cursor: &mut TokenCursor) -> Expr {
     let mut expr = equality(cursor);
 
     let equal = cursor.advance_if_match(&TokenType::Equal);
-    if equal.is_some() {
+    if let Some(equal) = equal {
         let value = assignment(cursor);
 
         match expr {
-            Expr::Variable { name } => expr = Expr::Assign { name, value: Box::new(value) },
-            _ => panic!("Invalid assignment target at line {}", equal.unwrap().line)
+            Expr::Variable { name } => {
+                expr = Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                }
+            }
+            _ => panic!("Invalid assignment target at line {}", equal.line),
         };
     }
 
@@ -167,7 +195,9 @@ fn primary(cursor: &mut TokenCursor) -> Expr {
         | TokenType::Nil
         | TokenType::Number(_)
         | TokenType::String(_) => {
-            let literal = Expr::Literal { value: LiteralValue::from(current) };
+            let literal = Expr::Literal {
+                value: LiteralValue::from(current),
+            };
             cursor.advance();
             literal
         }
@@ -179,7 +209,7 @@ fn primary(cursor: &mut TokenCursor) -> Expr {
         TokenType::LeftParen => {
             cursor.advance();
             let expr = expression(cursor);
-            let right_paren = cursor.advance_if_any_match(&[TokenType::RightParen]);
+            let right_paren = cursor.advance_if_match(&TokenType::RightParen);
             right_paren.expect("Expect ')' after expression.");
             Expr::Grouping {
                 expression: Box::new(expr),

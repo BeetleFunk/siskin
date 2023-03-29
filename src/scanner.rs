@@ -9,7 +9,7 @@ pub fn scan_tokens(code: &str) -> Vec<Token> {
         tokens.push(token);
 
         if matches!(tokens.last().unwrap().token_type, TokenType::EOF) {
-            break tokens
+            break tokens;
         }
     }
 }
@@ -91,7 +91,7 @@ impl Cursor {
         }
     }
 
-    // advance to the next char if not at the end of the Vec
+    // advance to the next char (after end index) if not at the end of the Vec
     fn take(&mut self) -> Option<char> {
         if self.end < self.code.len() {
             self.begin = self.end;
@@ -131,82 +131,86 @@ impl Cursor {
 
 fn next_token(cursor: &mut Cursor) -> Token {
     if let Some(current) = cursor.take() {
-        match current {
-            '(' => token_at_cursor(cursor, TokenType::LeftParen),
-            ')' => token_at_cursor(cursor, TokenType::RightParen),
-            '{' => token_at_cursor(cursor, TokenType::LeftBrace),
-            '}' => token_at_cursor(cursor, TokenType::RightBrace),
-            ',' => token_at_cursor(cursor, TokenType::Comma),
-            '.' => token_at_cursor(cursor, TokenType::Dot),
-            '-' => token_at_cursor(cursor, TokenType::Minus),
-            '+' => token_at_cursor(cursor, TokenType::Plus),
-            ';' => token_at_cursor(cursor, TokenType::Semicolon),
-            '*' => token_at_cursor(cursor, TokenType::Star),
-            '!' => {
-                if cursor.buffer_next_if_match('=') {
-                    token_at_cursor(cursor, TokenType::BangEqual)
-                } else {
-                    token_at_cursor(cursor, TokenType::Bang)
-                }
-            }
-            '=' => {
-                if cursor.buffer_next_if_match('=') {
-                    token_at_cursor(cursor, TokenType::EqualEqual)
-                } else {
-                    token_at_cursor(cursor, TokenType::Equal)
-                }
-            }
-            '<' => {
-                if cursor.buffer_next_if_match('=') {
-                    token_at_cursor(cursor, TokenType::LessEqual)
-                } else {
-                    token_at_cursor(cursor, TokenType::Less)
-                }
-            }
-            '>' => {
-                if cursor.buffer_next_if_match('=') {
-                    token_at_cursor(cursor, TokenType::GreaterEqual)
-                } else {
-                    token_at_cursor(cursor, TokenType::Greater)
-                }
-            }
-            '/' => {
-                if cursor.buffer_next_if_match('/') {
-                    // consume until end of line but don't also consume the newline
-                    cursor.buffer_next_until(|next| next == '\n');
-                    // next token should be either the newline or end-of-file
-                    next_token(cursor)
-                } else {
-                    token_at_cursor(cursor, TokenType::Slash)
-                }
-            }
-            ' ' | '\r' | '\t' => next_token(cursor), // Ignore whitespace
-            '\n' => {
-                cursor.line += 1;
-                next_token(cursor)
-            }
-            '"' => {
-                cursor.buffer_next_until(|next| next == '"');
-                if cursor.buffer_next_if_match('"') {
-                    let quoted = cursor.string_at_cursor();
-                    // TODO increment line count if newlines within string
-                    Token {
-                        // lexeme bounded by quote chars so this slice should never panic
-                        token_type: TokenType::String(quoted[1..quoted.len()-1].to_string()),
-                        lexeme: quoted,
-                        line: cursor.line,
+        if current.is_whitespace() {
+            // ignore whitespace
+            next_token(cursor)
+        } else {
+            match current {
+                '(' => token_at_cursor(cursor, TokenType::LeftParen),
+                ')' => token_at_cursor(cursor, TokenType::RightParen),
+                '{' => token_at_cursor(cursor, TokenType::LeftBrace),
+                '}' => token_at_cursor(cursor, TokenType::RightBrace),
+                ',' => token_at_cursor(cursor, TokenType::Comma),
+                '.' => token_at_cursor(cursor, TokenType::Dot),
+                '-' => token_at_cursor(cursor, TokenType::Minus),
+                '+' => token_at_cursor(cursor, TokenType::Plus),
+                ';' => token_at_cursor(cursor, TokenType::Semicolon),
+                '*' => token_at_cursor(cursor, TokenType::Star),
+                '!' => {
+                    if cursor.buffer_next_if_match('=') {
+                        token_at_cursor(cursor, TokenType::BangEqual)
+                    } else {
+                        token_at_cursor(cursor, TokenType::Bang)
                     }
-                } else {
-                    panic!("Unterminated string at line {0}", cursor.line)
                 }
-            }
-            _ => {
-                if current.is_alphabetic() {
-                    scan_identifier(cursor)
-                } else if current.is_digit(10) {
-                    scan_number(cursor)
-                } else {
-                    panic!("Unexpected character at line {0}", cursor.line)
+                '=' => {
+                    if cursor.buffer_next_if_match('=') {
+                        token_at_cursor(cursor, TokenType::EqualEqual)
+                    } else {
+                        token_at_cursor(cursor, TokenType::Equal)
+                    }
+                }
+                '<' => {
+                    if cursor.buffer_next_if_match('=') {
+                        token_at_cursor(cursor, TokenType::LessEqual)
+                    } else {
+                        token_at_cursor(cursor, TokenType::Less)
+                    }
+                }
+                '>' => {
+                    if cursor.buffer_next_if_match('=') {
+                        token_at_cursor(cursor, TokenType::GreaterEqual)
+                    } else {
+                        token_at_cursor(cursor, TokenType::Greater)
+                    }
+                }
+                '/' => {
+                    if cursor.buffer_next_if_match('/') {
+                        // consume until end of line but don't also consume the newline
+                        cursor.buffer_next_until(|next| next == '\n');
+                        // next token should be either the newline or end-of-file
+                        next_token(cursor)
+                    } else {
+                        token_at_cursor(cursor, TokenType::Slash)
+                    }
+                }
+                '\n' => {
+                    cursor.line += 1;
+                    next_token(cursor)
+                }
+                '"' => {
+                    cursor.buffer_next_until(|next| next == '"');
+                    if cursor.buffer_next_if_match('"') {
+                        let quoted = cursor.string_at_cursor();
+                        // TODO increment line count if newlines within string
+                        Token {
+                            // lexeme bounded by quote chars so this slice should never panic
+                            token_type: TokenType::String(quoted[1..quoted.len() - 1].to_string()),
+                            lexeme: quoted,
+                            line: cursor.line,
+                        }
+                    } else {
+                        panic!("Unterminated string at line {0}", cursor.line)
+                    }
+                }
+                _ => {
+                    if current.is_alphabetic() {
+                        scan_identifier(cursor)
+                    } else if current.is_digit(10) {
+                        scan_number(cursor)
+                    } else {
+                        panic!("Unexpected character at line {0}", cursor.line)
+                    }
                 }
             }
         }
