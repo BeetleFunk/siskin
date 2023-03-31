@@ -7,6 +7,7 @@ use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
 type StmtResult = GenericResult<Stmt>;
+type ExprResult = GenericResult<Expr>;
 
 pub fn parse(tokens: &Vec<Token>) -> GenericResult<Vec<Stmt>> {
     let mut cursor = TokenCursor::new(tokens);
@@ -27,10 +28,9 @@ fn declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
-    // Convert all these
     cursor
         .advance_if_match(&TokenType::Var)
-        .ok_or_else(|| BasicError::new("Parsing var declaration with invalid token"))?;
+        .ok_or_else(|| build_error("Variable declaration with invalid token.", cursor.peek().line))?;
 
     // TODO: this can be cleaner after literal restructuring
     let current = cursor.peek();
@@ -40,11 +40,11 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
             cursor.advance();
             clone
         }
-        _ => panic!("Expect variable name."),
+        _ => return Err(Box::new(build_error("Expect variable name.", current.line))),
     };
 
     let initializer = if cursor.advance_if_match(&TokenType::Equal).is_some() {
-        expression(cursor)
+        expression(cursor)?
     } else {
         // uninitialized variables default to nil
         Expr::Literal {
@@ -54,7 +54,7 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
 
     cursor
         .advance_if_match(&TokenType::Semicolon)
-        .expect("Expect ';' after variable declaration.");
+        .ok_or_else(|| build_error("Expect ';' after variable declaration.", name.line))?;
 
     Ok(Stmt::Var { name, initializer })
 }
@@ -70,26 +70,26 @@ fn statement(cursor: &mut TokenCursor) -> StmtResult {
 fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
     cursor
         .advance_if_match(&TokenType::Print)
-        .expect("Parsing print statement with invalid token");
-    let expression = expression(cursor);
+        .ok_or_else(|| build_error("Print statement with invalid token.", cursor.peek().line))?;
+    let expression = expression(cursor)?;
     cursor
         .advance_if_match(&TokenType::Semicolon)
-        .expect("Expect ';' after expression.");
+        .ok_or_else(|| build_error("Expect ';' after expression.", cursor.peek().line))?;
     Ok(Stmt::Print { expression })
 }
 
 fn expression_statement(cursor: &mut TokenCursor) -> StmtResult {
-    let expression = expression(cursor);
+    let expression = expression(cursor)?;
     cursor
         .advance_if_match(&TokenType::Semicolon)
-        .expect("Expect ';' after expression.");
+        .ok_or_else(|| build_error("Expect ';' after expression.", cursor.peek().line))?;
     Ok(Stmt::Expression { expression })
 }
 
 fn block_statement(cursor: &mut TokenCursor) -> StmtResult {
     cursor
         .advance_if_match(&TokenType::LeftBrace)
-        .expect("Parsing block statement with invalid token");
+        .ok_or_else(|| build_error("Block statement with invalid token.", cursor.peek().line))?;
 
     let mut statements = Vec::new();
     while cursor.advance_if_match(&TokenType::RightBrace).is_none() {
@@ -99,17 +99,17 @@ fn block_statement(cursor: &mut TokenCursor) -> StmtResult {
     Ok(Stmt::Block { statements })
 }
 
-fn expression(cursor: &mut TokenCursor) -> Expr {
+fn expression(cursor: &mut TokenCursor) -> ExprResult {
     assignment(cursor)
 }
 
-fn assignment(cursor: &mut TokenCursor) -> Expr {
+fn assignment(cursor: &mut TokenCursor) -> ExprResult {
     // TODO: Good way to avoid making this mutable?
-    let mut expr = equality(cursor);
+    let mut expr = equality(cursor)?;
 
     let equal = cursor.advance_if_match(&TokenType::Equal);
     if let Some(equal) = equal {
-        let value = assignment(cursor);
+        let value = assignment(cursor)?;
 
         match expr {
             Expr::Variable { name } => {
@@ -118,14 +118,14 @@ fn assignment(cursor: &mut TokenCursor) -> Expr {
                     value: Box::new(value),
                 }
             }
-            _ => panic!("Invalid assignment target at line {}", equal.line),
+            _ => return Err(Box::new(build_error("Invalid assignment target.", equal.line))),
         };
     }
 
-    expr
+    Ok(expr)
 }
 
-fn equality(cursor: &mut TokenCursor) -> Expr {
+fn equality(cursor: &mut TokenCursor) -> ExprResult {
     binary_left_associative(
         cursor,
         comparison,
@@ -133,7 +133,7 @@ fn equality(cursor: &mut TokenCursor) -> Expr {
     )
 }
 
-fn comparison(cursor: &mut TokenCursor) -> Expr {
+fn comparison(cursor: &mut TokenCursor) -> ExprResult {
     binary_left_associative(
         cursor,
         addition,
@@ -146,24 +146,24 @@ fn comparison(cursor: &mut TokenCursor) -> Expr {
     )
 }
 
-fn addition(cursor: &mut TokenCursor) -> Expr {
+fn addition(cursor: &mut TokenCursor) -> ExprResult {
     binary_left_associative(cursor, multiplication, &[TokenType::Minus, TokenType::Plus])
 }
 
-fn multiplication(cursor: &mut TokenCursor) -> Expr {
+fn multiplication(cursor: &mut TokenCursor) -> ExprResult {
     binary_left_associative(cursor, unary, &[TokenType::Slash, TokenType::Star])
 }
 
 // Parse a binary left associative expression as long as the current token matches one of the given types
 fn binary_left_associative(
     cursor: &mut TokenCursor,
-    higher_precedence: fn(&mut TokenCursor) -> Expr,
+    higher_precedence: fn(&mut TokenCursor) -> ExprResult,
     types: &[TokenType],
-) -> Expr {
-    let mut expr = higher_precedence(cursor);
+) -> ExprResult {
+    let mut expr = higher_precedence(cursor)?;
 
     while let Some(operator) = cursor.advance_if_any_match(types) {
-        let right = higher_precedence(cursor);
+        let right = higher_precedence(cursor)?;
         expr = Expr::Binary {
             left: Box::new(expr),
             operator,
@@ -171,22 +171,22 @@ fn binary_left_associative(
         };
     }
 
-    expr
+    Ok(expr)
 }
 
-fn unary(cursor: &mut TokenCursor) -> Expr {
+fn unary(cursor: &mut TokenCursor) -> ExprResult {
     while let Some(operator) = cursor.advance_if_any_match(&[TokenType::Bang, TokenType::Minus]) {
-        let right = unary(cursor);
-        return Expr::Unary {
+        let right = unary(cursor)?;
+        return Ok(Expr::Unary {
             operator,
             right: Box::new(right),
-        };
+        });
     }
 
     primary(cursor)
 }
 
-fn primary(cursor: &mut TokenCursor) -> Expr {
+fn primary(cursor: &mut TokenCursor) -> ExprResult {
     let current = cursor.peek();
 
     match current.token_type {
@@ -199,24 +199,29 @@ fn primary(cursor: &mut TokenCursor) -> Expr {
                 value: LiteralValue::from(current),
             };
             cursor.advance();
-            literal
+            Ok(literal)
         }
         TokenType::Identifier(_) => {
             let name = current.clone();
             cursor.advance();
-            Expr::Variable { name }
+            Ok(Expr::Variable { name })
         }
         TokenType::LeftParen => {
             cursor.advance();
-            let expr = expression(cursor);
-            let right_paren = cursor.advance_if_match(&TokenType::RightParen);
-            right_paren.expect("Expect ')' after expression.");
-            Expr::Grouping {
+            let expr = expression(cursor)?;
+            cursor
+                .advance_if_match(&TokenType::RightParen)
+                .ok_or_else(|| build_error("Expect ')' after grouping expression.", cursor.peek().line))?;
+            Ok(Expr::Grouping {
                 expression: Box::new(expr),
-            }
+            })
         }
-        _ => panic!("Expect expression."),
+        _ => return Err(Box::new(build_error("Expect expression.", current.line))),
     }
+}
+
+fn build_error(message: &str, line: u32) -> BasicError {
+    BasicError::new(&format!("Parse error at line {line}: {message}"))
 }
 
 struct TokenCursor<'a> {

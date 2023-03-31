@@ -39,8 +39,7 @@ fn run_file(path: &str) -> ExecutionResult {
     println!("Running file: {path}");
     let contents = fs::read_to_string(path)?;
     let mut env = Environment::new();
-    run(&contents, &mut env)?;
-    Ok(())
+    run(&contents, &mut env)
 }
 
 fn run_prompt() -> ExecutionResult {
@@ -52,17 +51,19 @@ fn run_prompt() -> ExecutionResult {
 
     loop {
         stdin.read_line(&mut buffer)?;
-        run(&buffer, &mut env)?;
+        let result = run(&buffer, &mut env);
+        if let Err(error) = result {
+            println!("*** Encountered an error during execution ***");
+            println!("{error}");
+            println!("");
+        }
         buffer.clear();
     }
 }
 
 fn run(code: &str, env: &mut Environment) -> ExecutionResult {
-    println!("running code: {code}");
-
     let tokens = scan_tokens(code);
     let statements = parse(&tokens)?;
     interpreter::execute(&statements, env);
-
     Ok(())
 }
