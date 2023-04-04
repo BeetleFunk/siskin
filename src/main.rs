@@ -62,8 +62,7 @@ fn run_prompt() -> ExecutionResult {
 }
 
 fn run(code: &str, env: &mut Environment) -> ExecutionResult {
-    let tokens = scan_tokens(code);
+    let tokens = scan_tokens(code)?;
     let statements = parse(&tokens)?;
-    interpreter::execute(&statements, env);
-    Ok(())
+    interpreter::execute(&statements, env)
 }

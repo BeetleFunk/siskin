@@ -1,3 +1,5 @@
+use crate::error::BasicError;
+use crate::error::GenericResult;
 use crate::expr::Expr;
 use crate::expr::LiteralValue;
 use crate::scanner::Token;
@@ -5,6 +7,9 @@ use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
 use std::collections::HashMap;
+
+type UnitResult = GenericResult<()>;
+type ValueResult = GenericResult<LiteralValue>;
 
 #[derive(Debug)]
 pub struct Environment {
@@ -31,16 +36,18 @@ impl Environment {
         let frame = self
             .stack
             .last_mut()
-            .expect("Missing global scope frame from Environment stack.");
+            .expect("Missing global scope frame from Environment stack."); // panic here because this would indicate a bug in the interpreter
         frame.insert(name, value);
     }
 
-    // TODO: error propagation instead of panic in this function
-    fn assign(&mut self, name: String, value: LiteralValue) {
+    fn assign(&mut self, name: String, value: LiteralValue) -> UnitResult {
         if let Some(frame) = self.stack.iter_mut().rev().find(|x| x.contains_key(&name)) {
             frame.insert(name, value);
+            Ok(())
         } else {
-            panic!("Undefined variable: {}", name);
+            Err(Box::new(BasicError::new(&format!(
+                "Undefined variable ({name})"
+            ))))
         }
     }
 
@@ -54,13 +61,14 @@ impl Environment {
     }
 }
 
-pub fn execute(statements: &Vec<Stmt>, env: &mut Environment) {
+pub fn execute(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult {
     for statement in statements {
-        execute_statement(statement, env)
+        execute_statement(statement, env)?;
     }
+    Ok(())
 }
 
-fn execute_statement(statement: &Stmt, env: &mut Environment) {
+fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
     match statement {
         Stmt::Block { statements } => block_statement(statements, env),
         Stmt::Expression { expression } => expression_statement(expression, env),
@@ -69,30 +77,33 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) {
     }
 }
 
-fn block_statement(statements: &Vec<Stmt>, env: &mut Environment) {
+fn block_statement(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult {
     env.push();
     for statement in statements {
-        execute_statement(statement, env);
+        execute_statement(statement, env)?;
     }
     env.pop();
+    Ok(())
 }
 
-fn expression_statement(expression: &Expr, env: &mut Environment) {
-    evaluate(expression, env);
+fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
+    evaluate(expression, env)?;
+    Ok(())
 }
 
-fn print_statement(expression: &Expr, env: &mut Environment) {
-    let result = evaluate(expression, env);
+fn print_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
+    let result = evaluate(expression, env)?;
     println!("{}", result.to_string());
+    Ok(())
 }
 
-fn var_statement(name: &Token, initializer: &Expr, env: &mut Environment) {
-    let result = evaluate(initializer, env);
+fn var_statement(name: &Token, initializer: &Expr, env: &mut Environment) -> UnitResult {
+    let result = evaluate(initializer, env)?;
     env.define(name.lexeme.clone(), result);
+    Ok(())
 }
 
-// TODO: What is the proper return type here? Do we need custom expression result for later features?
-fn evaluate(expression: &Expr, env: &mut Environment) -> LiteralValue {
+fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
     match expression {
         Expr::Assign { name, value } => evaluate_assign(name, value, env),
         Expr::Binary {
@@ -107,26 +118,35 @@ fn evaluate(expression: &Expr, env: &mut Environment) -> LiteralValue {
     }
 }
 
-fn evaluate_assign(name: &Token, value: &Box<Expr>, env: &mut Environment) -> LiteralValue {
-    let result = evaluate(value, env);
-    env.assign(name.lexeme.clone(), result.clone());
-    result
+fn evaluate_assign(name: &Token, value: &Box<Expr>, env: &mut Environment) -> ValueResult {
+    let result = evaluate(value, env)?;
+    env.assign(name.lexeme.clone(), result.clone())
+        .or_else(|e| Err(build_error(&e.to_string(), name.line)))?;
+    Ok(result)
 }
 
-// TODO: error propagation instead of panic in this function
 fn evaluate_binary(
     left: &Box<Expr>,
     operator: &Token,
     right: &Box<Expr>,
     env: &mut Environment,
-) -> LiteralValue {
-    let left_result = evaluate(left, env);
-    let right_result = evaluate(right, env);
+) -> ValueResult {
+    let left_evaluated = evaluate(left, env)?;
+    let right_evaluated = evaluate(right, env)?;
 
-    if is_numeric_binary_operation(&operator.token_type) {
-        // TODO: error propagation instead of panic
-        let left_number = extract_number(&left_result).unwrap();
-        let right_number = extract_number(&right_result).unwrap();
+    let evaluated = if is_numeric_binary_operation(&operator.token_type) {
+        let left_number = extract_number(&left_evaluated).ok_or_else(|| {
+            build_error(
+                "Cannot perform numeric operation on non-numeric value.",
+                operator.line,
+            )
+        })?;
+        let right_number = extract_number(&right_evaluated).ok_or_else(|| {
+            build_error(
+                "Cannot perform numeric operation on non-numeric value.",
+                operator.line,
+            )
+        })?;
 
         match operator.token_type {
             TokenType::Minus => LiteralValue::Number(left_number - right_number),
@@ -137,53 +157,64 @@ fn evaluate_binary(
             TokenType::GreaterEqual => LiteralValue::Boolean(left_number >= right_number),
             TokenType::Less => LiteralValue::Boolean(left_number < right_number),
             TokenType::LessEqual => LiteralValue::Boolean(left_number <= right_number),
+            // unhandled case here indicates a bug in the parser or interpreter
             _ => panic!(
-                "Unhandled binary numeric operation type {:?}",
+                "Unhandled binary numeric operation type: {:?}",
                 operator.token_type
             ),
         }
     } else {
         match operator.token_type {
-            TokenType::EqualEqual => LiteralValue::Boolean(left_result == right_result),
-            TokenType::BangEqual => LiteralValue::Boolean(left_result != right_result),
+            TokenType::EqualEqual => LiteralValue::Boolean(left_evaluated == right_evaluated),
+            TokenType::BangEqual => LiteralValue::Boolean(left_evaluated != right_evaluated),
+            // unhandled case here indicates a bug in the parser or interpreter
             _ => panic!(
-                "Unhandled binary non-numeric operation type {:?}",
+                "Unhandled binary non-numeric operation type: {:?}",
                 operator.token_type
             ),
         }
-    }
+    };
+    Ok(evaluated)
 }
 
-fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> LiteralValue {
+fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResult {
     evaluate(expression, env)
 }
 
-fn evaluate_literal(value: &LiteralValue) -> LiteralValue {
-    value.clone()
+fn evaluate_literal(value: &LiteralValue) -> ValueResult {
+    Ok(value.clone())
 }
 
-fn evaluate_unary(operator: &Token, right: &Box<Expr>, env: &mut Environment) -> LiteralValue {
-    let operand = evaluate(right, env);
-    match operator.token_type {
+fn evaluate_unary(operator: &Token, right: &Box<Expr>, env: &mut Environment) -> ValueResult {
+    let operand = evaluate(right, env)?;
+    let evaluated = match operator.token_type {
         TokenType::Bang => LiteralValue::Boolean(!is_truthy(&operand)),
         TokenType::Minus => {
-            // TODO: error propagation instead of panic here
-            let original = extract_number(&operand).unwrap();
+            let original = extract_number(&operand).ok_or_else(|| {
+                build_error(
+                    "Cannot perform negation operation on non-numeric value.",
+                    operator.line,
+                )
+            })?;
             LiteralValue::Number(-original)
         }
+        // unhandled case here indicates a bug in the parser or interpreter
         _ => panic!(
             "Unary expression not implemented in interpreter: {:?}",
             operator
         ),
-    }
+    };
+    Ok(evaluated)
 }
 
-// TODO: error propagation instead of panic in this function
-fn evaluate_variable(name: &Token, env: &Environment) -> LiteralValue {
+fn evaluate_variable(name: &Token, env: &Environment) -> ValueResult {
     if let Some(value) = env.get(&name.lexeme) {
-        value.clone()
+        Ok(value.clone())
     } else {
-        panic!("Variable {} not found", name.lexeme)
+        Err(Box::new(build_error(
+            &format!("Variable ({}) not found.", name.lexeme),
+            name.line,
+        )))
     }
 }
 
@@ -214,4 +245,8 @@ fn is_numeric_binary_operation(operator: &TokenType) -> bool {
         | TokenType::LessEqual => true,
         _ => false,
     }
+}
+
+fn build_error(message: &str, line: u32) -> BasicError {
+    BasicError::new(&format!("Interpret error at line {line}: {message}"))
 }

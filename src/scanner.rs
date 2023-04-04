@@ -1,15 +1,18 @@
-pub fn scan_tokens(code: &str) -> Vec<Token> {
+use crate::error::BasicError;
+use crate::error::GenericResult;
+
+type TokenResult = GenericResult<Token>;
+
+pub fn scan_tokens(code: &str) -> GenericResult<Vec<Token>> {
     let mut tokens: Vec<Token> = Vec::new();
 
     let code_chars: Vec<char> = code.chars().collect();
     let mut cursor = Cursor::new(code_chars);
 
     loop {
-        let token = next_token(&mut cursor);
-        tokens.push(token);
-
-        if matches!(tokens.last().unwrap().token_type, TokenType::EOF) {
-            break tokens;
+        tokens.push(next_token(&mut cursor)?);
+        if tokens.last().unwrap().token_type == TokenType::EOF {
+            break Ok(tokens);
         }
     }
 }
@@ -127,9 +130,13 @@ impl Cursor {
         let chars = &self.code[self.begin..self.end];
         String::from_iter(chars)
     }
+
+    fn chars_at_cursor<'a>(&'a self) -> &'a[char] {
+        &self.code[self.begin..self.end]
+    }
 }
 
-fn next_token(cursor: &mut Cursor) -> Token {
+fn next_token(cursor: &mut Cursor) -> TokenResult {
     if let Some(current) = cursor.take() {
         if current.is_whitespace() {
             // ignore whitespace
@@ -191,16 +198,19 @@ fn next_token(cursor: &mut Cursor) -> Token {
                 '"' => {
                     cursor.buffer_next_until(|next| next == '"');
                     if cursor.buffer_next_if_match('"') {
+                        // increment line count for any newline characters within the string but keep track of original line number
+                        let starting_line = cursor.line;
+                        cursor.line += cursor.chars_at_cursor().iter().filter(|&c| *c == '\n').count() as u32;
+
                         let quoted = cursor.string_at_cursor();
-                        // TODO increment line count if newlines within string
-                        Token {
+                        Ok(Token {
                             // lexeme bounded by quote chars so this slice should never panic
-                            token_type: TokenType::String(quoted[1..quoted.len() - 1].to_string()),
+                            token_type: TokenType::String(quoted[1..(quoted.len() - 1)].to_string()),
                             lexeme: quoted,
-                            line: cursor.line,
-                        }
+                            line: starting_line,
+                        })
                     } else {
-                        panic!("Unterminated string at line {0}", cursor.line)
+                        Err(Box::new(build_error("Unterminated string.", cursor.line)))
                     }
                 }
                 _ => {
@@ -209,29 +219,29 @@ fn next_token(cursor: &mut Cursor) -> Token {
                     } else if current.is_digit(10) {
                         scan_number(cursor)
                     } else {
-                        panic!("Unexpected character at line {0}", cursor.line)
+                        Err(Box::new(build_error(&format!("Unexpected character '{current}'."), cursor.line)))
                     }
                 }
             }
         }
     } else {
-        Token {
+        Ok(Token {
             token_type: TokenType::EOF,
             lexeme: String::from(""),
             line: cursor.line,
-        }
+        })
     }
 }
 
-fn token_at_cursor(cursor: &Cursor, token_type: TokenType) -> Token {
-    Token {
+fn token_at_cursor(cursor: &Cursor, token_type: TokenType) -> TokenResult {
+    Ok(Token {
         token_type,
         lexeme: cursor.string_at_cursor(),
         line: cursor.line,
-    }
+    })
 }
 
-fn scan_identifier(cursor: &mut Cursor) -> Token {
+fn scan_identifier(cursor: &mut Cursor) -> TokenResult {
     cursor.buffer_next_until(|next| !next.is_alphanumeric());
     let lexeme = cursor.string_at_cursor();
 
@@ -241,15 +251,16 @@ fn scan_identifier(cursor: &mut Cursor) -> Token {
         TokenType::Identifier(lexeme.clone())
     };
 
-    Token {
+    Ok(Token {
         token_type,
         lexeme,
         line: cursor.line,
-    }
+    })
 }
 
-fn scan_number(cursor: &mut Cursor) -> Token {
+fn scan_number(cursor: &mut Cursor) -> TokenResult {
     let is_not_digit = |next: char| !next.is_digit(10);
+
     cursor.buffer_next_until(is_not_digit);
 
     // pickup fractional part if necessary
@@ -259,13 +270,13 @@ fn scan_number(cursor: &mut Cursor) -> Token {
 
     let lexeme = cursor.string_at_cursor();
 
-    // TODO return result with error
-    let number: f64 = lexeme.parse().unwrap();
-
-    Token {
-        token_type: TokenType::Number(number),
-        lexeme: lexeme,
-        line: cursor.line,
+    match lexeme.parse() {
+        Ok(number) => Ok(Token {
+            token_type: TokenType::Number(number),
+            lexeme: lexeme,
+            line: cursor.line,
+        }),
+        Err(e) => Err(Box::new(build_error(&e.to_string(), cursor.line))),
     }
 }
 
@@ -289,4 +300,8 @@ fn to_keyword(identifier: &str) -> Option<TokenType> {
         "while" => Option::Some(TokenType::While),
         _ => Option::None,
     }
+}
+
+fn build_error(message: &str, line: u32) -> BasicError {
+    BasicError::new(&format!("Scan error at line {line}: {message}"))
 }
