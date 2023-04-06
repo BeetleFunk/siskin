@@ -139,7 +139,10 @@ impl Cursor {
 fn next_token(cursor: &mut Cursor) -> TokenResult {
     if let Some(current) = cursor.take() {
         if current.is_whitespace() {
-            // ignore whitespace
+            // increment line count for each newline, ignore all other whitespace
+            if current == '\n' {
+                cursor.line += 1;
+            }
             next_token(cursor)
         } else {
             match current {
@@ -190,10 +193,6 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                     } else {
                         token_at_cursor(cursor, TokenType::Slash)
                     }
-                }
-                '\n' => {
-                    cursor.line += 1;
-                    next_token(cursor)
                 }
                 '"' => {
                     cursor.buffer_next_until(|next| next == '"');
