@@ -7,20 +7,22 @@ use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
 use std::collections::HashMap;
+use std::io::Write;
 
 type UnitResult = GenericResult<()>;
 type ValueResult = GenericResult<LiteralValue>;
 
-#[derive(Debug)]
-pub struct Environment {
+pub struct Environment<'a> {
     stack: Vec<HashMap<String, LiteralValue>>,
+    output_writer: &'a mut dyn Write,
 }
 
-impl Environment {
-    pub fn new() -> Environment {
+impl<'a> Environment<'a> {
+    pub fn new(output_writer: &'a mut dyn Write) -> Environment<'a> {
         // initialize the global environment map as the first entry on the stack
         Environment {
             stack: vec![HashMap::new()],
+            output_writer,
         }
     }
 
@@ -93,7 +95,8 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
 
 fn print_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
     let result = evaluate(expression, env)?;
-    println!("{}", result.to_string());
+    writeln!(env.output_writer, "{}", result.to_string())
+        .expect("Writing to program output should always succeed.");
     Ok(())
 }
 
