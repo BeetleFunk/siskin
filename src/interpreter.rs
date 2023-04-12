@@ -74,6 +74,7 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
     match statement {
         Stmt::Block { statements } => block_statement(statements, env),
         Stmt::Expression { expression } => expression_statement(expression, env),
+        Stmt::If { condition, then_branch, else_branch } => if_statement(condition, then_branch, else_branch, env),
         Stmt::Print { expression } => print_statement(expression, env),
         Stmt::Var { name, initializer } => var_statement(name, initializer, env),
     }
@@ -82,7 +83,13 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
 fn block_statement(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult {
     env.push();
     for statement in statements {
-        execute_statement(statement, env)?;
+        let result = execute_statement(statement, env);
+
+        // make sure to restore the stack even after an error. TODO: cleaner way to accomplish this?
+        if result.is_err() {
+            env.pop();
+            return result;
+        }
     }
     env.pop();
     Ok(())
@@ -91,6 +98,16 @@ fn block_statement(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult 
 fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
     evaluate(expression, env)?;
     Ok(())
+}
+
+fn if_statement(condition: &Expr, then_branch: &Box<Stmt>, else_branch: &Option<Box<Stmt>>, env: &mut Environment) -> UnitResult {
+    if is_truthy(&evaluate(condition, env)?) {
+        execute_statement(then_branch, env)
+    } else if let Some(else_statement) = else_branch {
+        execute_statement(else_statement, env)
+    } else {
+        Ok(())
+    }
 }
 
 fn print_statement(expression: &Expr, env: &mut Environment) -> UnitResult {

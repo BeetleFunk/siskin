@@ -1,7 +1,20 @@
-use siskin::ExecutionResult;
+use siskin::error;
+
+type TestResult = error::GenericResult<()>;
+
+// run siskin code using a fresh interpreter environment and return a string containing the program output
+fn run(code: &str) -> error::GenericResult<String> {
+    let mut buffer = Vec::new();
+    let mut env = siskin::Environment::new(&mut buffer);
+    siskin::execute(code, &mut env)?;
+
+    let output = std::str::from_utf8(&buffer.as_slice())?;
+
+    Ok(output.to_string())
+}
 
 #[test]
-fn variable_scoping() -> ExecutionResult {
+fn variable_scoping() -> TestResult {
     let code = "\
         var a = \"global a\";\n\
         var b = \"global b\";\n\
@@ -23,14 +36,7 @@ fn variable_scoping() -> ExecutionResult {
         print b;\n\
         print c;";
 
-    let mut buffer = Vec::new();
-    let mut env = siskin::Environment::new(&mut buffer);
-    siskin::execute(code, &mut env)?;
-
-    let output = std::str::from_utf8(&buffer.as_slice())?;
-
-    // println!("Test output was:");
-    // println!("{}", output);
+    let output = run(code)?;
 
     let expected = "\
         inner a\n\
@@ -44,6 +50,50 @@ fn variable_scoping() -> ExecutionResult {
         global c\n";
 
     assert_eq!(expected, output);
+
+    Ok(())
+}
+
+#[test]
+fn if_statement_true() -> TestResult {
+    let code = "\
+        var a = \"do it\";\n\
+        if (a == \"do it\") {\n\
+            print \"condition was true\";\n\
+        }";
+
+    let output = run(code)?;
+    assert_eq!("condition was true\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn if_statement_false() -> TestResult {
+    let code = "\
+        var a = \"nope\";\n\
+        if (a == \"do it\") {\n\
+            print \"condition was true\";\n\
+        }";
+
+    let output = run(code)?;
+    assert!(output.is_empty());
+
+    Ok(())
+}
+
+#[test]
+fn if_else_statement() -> TestResult {
+    let code = "\
+        var a = \"cond2\";\n\
+        if (a == \"cond1\") {\n\
+            print \"if condition was true\";\n\
+        } else if (a == \"cond2\") {\n\
+            print \"else condition was true\";\n\
+        }";
+
+    let output = run(code)?;
+    assert_eq!("else condition was true\n", output);
 
     Ok(())
 }

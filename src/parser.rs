@@ -60,17 +60,38 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn statement(cursor: &mut TokenCursor) -> StmtResult {
-    match cursor.peek().token_type {
-        TokenType::Print => print_statement(cursor),
-        TokenType::LeftBrace => block_statement(cursor),
-        _ => expression_statement(cursor),
+    if let Some(token) = cursor.advance_if_any_match(&[TokenType::If, TokenType::Print, TokenType::LeftBrace]) {
+        match token.token_type {
+            TokenType::If => if_statement(cursor),
+            TokenType::Print => print_statement(cursor),
+            TokenType::LeftBrace => block_statement(cursor),
+            _ => Err(Box::new(build_error("Unexpected token type when parsing statement.", token.line)))
+        }
+    } else {
+        expression_statement(cursor)
     }
 }
 
-fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
+fn if_statement(cursor: &mut TokenCursor) -> StmtResult {
     cursor
-        .advance_if_match(&TokenType::Print)
-        .ok_or_else(|| build_error("Print statement with invalid token.", cursor.peek().line))?;
+        .advance_if_match(&TokenType::LeftParen)
+        .ok_or_else(|| build_error("Expect '(' after 'if''.", cursor.peek().line))?;
+    let condition = expression(cursor)?;
+    cursor
+        .advance_if_match(&TokenType::RightParen)
+        .ok_or_else(|| build_error("Expect ')' after if condition.", cursor.peek().line))?;
+
+    let then_branch = Box::new(statement(cursor)?);
+    let else_branch = if cursor.advance_if_match(&TokenType::Else).is_some() {
+        Some(Box::new(statement(cursor)?))
+    } else {
+        None
+    };
+
+    Ok(Stmt::If { condition, then_branch, else_branch })
+}
+
+fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
     let expression = expression(cursor)?;
     cursor
         .advance_if_match(&TokenType::Semicolon)
@@ -87,15 +108,10 @@ fn expression_statement(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn block_statement(cursor: &mut TokenCursor) -> StmtResult {
-    cursor
-        .advance_if_match(&TokenType::LeftBrace)
-        .ok_or_else(|| build_error("Block statement with invalid token.", cursor.peek().line))?;
-
     let mut statements = Vec::new();
     while cursor.advance_if_match(&TokenType::RightBrace).is_none() {
         statements.push(declaration(cursor)?)
     }
-
     Ok(Stmt::Block { statements })
 }
 
