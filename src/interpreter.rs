@@ -74,7 +74,11 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
     match statement {
         Stmt::Block { statements } => block_statement(statements, env),
         Stmt::Expression { expression } => expression_statement(expression, env),
-        Stmt::If { condition, then_branch, else_branch } => if_statement(condition, then_branch, else_branch, env),
+        Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => if_statement(condition, then_branch, else_branch, env),
         Stmt::Print { expression } => print_statement(expression, env),
         Stmt::Var { name, initializer } => var_statement(name, initializer, env),
     }
@@ -100,7 +104,12 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
     Ok(())
 }
 
-fn if_statement(condition: &Expr, then_branch: &Box<Stmt>, else_branch: &Option<Box<Stmt>>, env: &mut Environment) -> UnitResult {
+fn if_statement(
+    condition: &Expr,
+    then_branch: &Box<Stmt>,
+    else_branch: &Option<Box<Stmt>>,
+    env: &mut Environment,
+) -> UnitResult {
     if is_truthy(&evaluate(condition, env)?) {
         execute_statement(then_branch, env)
     } else if let Some(else_statement) = else_branch {
@@ -133,6 +142,11 @@ fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
         } => evaluate_binary(left, operator, right, env),
         Expr::Grouping { expression } => evaluate_grouping(expression, env),
         Expr::Literal { value } => evaluate_literal(value),
+        Expr::Logical {
+            left,
+            operator,
+            right,
+        } => evaluate_logical(left, operator, right, env),
         Expr::Unary { operator, right } => evaluate_unary(operator, right, env),
         Expr::Variable { name } => evaluate_variable(name, env),
     }
@@ -203,6 +217,34 @@ fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResu
 
 fn evaluate_literal(value: &LiteralValue) -> ValueResult {
     Ok(value.clone())
+}
+
+fn evaluate_logical(
+    left: &Box<Expr>,
+    operator: &Token,
+    right: &Box<Expr>,
+    env: &mut Environment,
+) -> ValueResult {
+    let left_evaluated = evaluate(left, env)?;
+
+    // short circuit if possible
+    if operator.token_type == TokenType::Or {
+        if is_truthy(&left_evaluated) {
+            return Ok(left_evaluated);
+        }
+    } else if operator.token_type == TokenType::And {
+        if !is_truthy(&left_evaluated) {
+            return Ok(left_evaluated);
+        }
+    } else {
+        return Err(Box::new(build_error(
+            "Unhandled logical operator.",
+            operator.line,
+        )));
+    }
+
+    let right_evaluated = evaluate(right, env)?;
+    Ok(right_evaluated)
 }
 
 fn evaluate_unary(operator: &Token, right: &Box<Expr>, env: &mut Environment) -> ValueResult {

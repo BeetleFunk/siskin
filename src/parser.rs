@@ -120,8 +120,7 @@ fn expression(cursor: &mut TokenCursor) -> ExprResult {
 }
 
 fn assignment(cursor: &mut TokenCursor) -> ExprResult {
-    // TODO: Good way to avoid making this mutable?
-    let mut expr = equality(cursor)?;
+    let mut expr = or(cursor)?;
 
     let equal = cursor.advance_if_match(&TokenType::Equal);
     if let Some(equal) = equal {
@@ -135,6 +134,33 @@ fn assignment(cursor: &mut TokenCursor) -> ExprResult {
                 }
             }
             _ => return Err(Box::new(build_error("Invalid assignment target.", equal.line))),
+        };
+    }
+
+    Ok(expr)
+}
+
+fn or(cursor: &mut TokenCursor) -> ExprResult {
+    logical_expression(cursor, and, &TokenType::Or)
+}
+
+fn and(cursor: &mut TokenCursor) -> ExprResult {
+    logical_expression(cursor, equality, &TokenType::And)
+}
+
+fn logical_expression(
+    cursor: &mut TokenCursor,
+    higher_precedence: fn(&mut TokenCursor) -> ExprResult,
+    token_type: &TokenType
+) -> ExprResult {
+    let mut expr = higher_precedence(cursor)?;
+
+    while let Some(operator) = cursor.advance_if_match(token_type) {
+        let right = higher_precedence(cursor)?;
+        expr = Expr::Logical {
+            left: Box::new(expr),
+            operator,
+            right: Box::new(right),
         };
     }
 

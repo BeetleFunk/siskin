@@ -97,3 +97,33 @@ fn if_else_statement() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn logical_or() -> TestResult {
+    let code = "\
+        var a = true;\n\
+        var b = false;\n\
+        if (a or b) {\n\
+            print \"condition was true\";\n\
+        }";
+
+    let output = run(code)?;
+    assert_eq!("condition was true\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn logical_and() -> TestResult {
+    let code = "\
+        var a = true;\n\
+        var b = false;\n\
+        if (a and b) {\n\
+            print \"condition was true\";\n\
+        }";
+
+    let output = run(code)?;
+    assert!(output.is_empty());
+
+    Ok(())
+}
