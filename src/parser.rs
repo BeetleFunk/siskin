@@ -95,10 +95,10 @@ fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
         .ok_or_else(|| build_error("Expect ';' after loop condition.", cursor.peek().line))?;
 
     let increment = if cursor.peek().token_type == TokenType::RightParen {
-            Expr::Literal { value: LiteralValue::Nil } // stand-in for empty expr
-        } else {
-            expression(cursor)?
-        };
+        Expr::Literal { value: LiteralValue::Nil } // stand-in for empty expr
+    } else {
+        expression(cursor)?
+    };
     cursor
         .advance_if_match(&TokenType::RightParen)
         .ok_or_else(|| build_error("Expect ')' after for clauses.", cursor.peek().line))?;

@@ -152,7 +152,10 @@ fn for_loop() -> TestResult {
         for (; a < 25;) { print a; a = a + 1; }";
 
     let output = run(code)?;
-    assert_eq!("0\n1\n2\n3\n4\n14\n13\n12\n11\n10\n20\n21\n22\n23\n24\n", output);
+    assert_eq!(
+        "0\n1\n2\n3\n4\n14\n13\n12\n11\n10\n20\n21\n22\n23\n24\n",
+        output
+    );
 
     Ok(())
 }
