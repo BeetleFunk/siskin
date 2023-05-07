@@ -134,11 +134,25 @@ fn while_loop() -> TestResult {
         var a = 0;\n\
         while (a < 5) {\n\
             print a;\n\
-            a = a + 1;
+            a = a + 1;\n\
         }";
 
     let output = run(code)?;
     assert_eq!("0\n1\n2\n3\n4\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn for_loop() -> TestResult {
+    let code = "\
+        for (var a = 0; a < 5; a = a + 1) { print a; }
+        for (var a = 14; a >= 10; ) { print a; a = a - 1; }
+        var a = 20;
+        for (; a < 25;) { print a; a = a + 1; }";
+
+    let output = run(code)?;
+    assert_eq!("0\n1\n2\n3\n4\n14\n13\n12\n11\n10\n20\n21\n22\n23\n24\n", output);
 
     Ok(())
 }

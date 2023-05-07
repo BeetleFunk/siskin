@@ -60,8 +60,9 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn statement(cursor: &mut TokenCursor) -> StmtResult {
-    if let Some(token) = cursor.advance_if_any_match(&[TokenType::If, TokenType::Print, TokenType::While, TokenType::LeftBrace]) {
+    if let Some(token) = cursor.advance_if_any_match(&[TokenType::For, TokenType::If, TokenType::Print, TokenType::While, TokenType::LeftBrace]) {
         match token.token_type {
+            TokenType::For => for_statement(cursor),
             TokenType::If => if_statement(cursor),
             TokenType::Print => print_statement(cursor),
             TokenType::While => while_statement(cursor),
@@ -71,6 +72,45 @@ fn statement(cursor: &mut TokenCursor) -> StmtResult {
     } else {
         expression_statement(cursor)
     }
+}
+
+fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
+    cursor
+        .advance_if_match(&TokenType::LeftParen)
+        .ok_or_else(|| build_error("Expect '(' after 'for''.", cursor.peek().line))?;
+
+    let initializer = match cursor.peek().token_type {
+        TokenType::Semicolon => { cursor.advance(); Stmt::Block { statements: Vec::new() } }, // stand-in for empty statement
+        TokenType::Var => var_declaration(cursor)?,
+        _ => expression_statement(cursor)?,
+    };
+
+    let condition = if cursor.peek().token_type == TokenType::Semicolon {
+        Expr::Literal { value: LiteralValue::Boolean(true) } // empty condition defaults to true (infinite looping)
+    } else {
+        expression(cursor)?
+    };
+    cursor
+        .advance_if_match(&TokenType::Semicolon)
+        .ok_or_else(|| build_error("Expect ';' after loop condition.", cursor.peek().line))?;
+
+    let increment = if cursor.peek().token_type == TokenType::RightParen {
+            Expr::Literal { value: LiteralValue::Nil } // stand-in for empty expr
+        } else {
+            expression(cursor)?
+        };
+    cursor
+        .advance_if_match(&TokenType::RightParen)
+        .ok_or_else(|| build_error("Expect ')' after for clauses.", cursor.peek().line))?;
+
+    let for_body = statement(cursor)?;
+
+    // transform for loop components into equivalent block statement containing initializer and while loop
+
+    let while_body = Stmt::Block { statements: vec![for_body, Stmt::Expression { expression: increment }] };
+    let while_loop = Stmt::While { condition, body: Box::new(while_body) };
+
+    Ok(Stmt::Block { statements: vec![initializer, while_loop] })
 }
 
 fn if_statement(cursor: &mut TokenCursor) -> StmtResult {
