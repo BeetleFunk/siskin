@@ -127,3 +127,18 @@ fn logical_and() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn while_loop() -> TestResult {
+    let code = "\
+        var a = 0;\n\
+        while (a < 5) {\n\
+            print a;\n\
+            a = a + 1;
+        }";
+
+    let output = run(code)?;
+    assert_eq!("0\n1\n2\n3\n4\n", output);
+
+    Ok(())
+}

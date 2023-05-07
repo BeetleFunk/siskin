@@ -60,10 +60,11 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn statement(cursor: &mut TokenCursor) -> StmtResult {
-    if let Some(token) = cursor.advance_if_any_match(&[TokenType::If, TokenType::Print, TokenType::LeftBrace]) {
+    if let Some(token) = cursor.advance_if_any_match(&[TokenType::If, TokenType::Print, TokenType::While, TokenType::LeftBrace]) {
         match token.token_type {
             TokenType::If => if_statement(cursor),
             TokenType::Print => print_statement(cursor),
+            TokenType::While => while_statement(cursor),
             TokenType::LeftBrace => block_statement(cursor),
             _ => Err(Box::new(build_error("Unexpected token type when parsing statement.", token.line)))
         }
@@ -97,6 +98,19 @@ fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
         .advance_if_match(&TokenType::Semicolon)
         .ok_or_else(|| build_error("Expect ';' after expression.", cursor.peek().line))?;
     Ok(Stmt::Print { expression })
+}
+
+fn while_statement(cursor: &mut TokenCursor) -> StmtResult {
+    cursor
+        .advance_if_match(&TokenType::LeftParen)
+        .ok_or_else(|| build_error("Expect '(' after 'while''.", cursor.peek().line))?;
+    let condition = expression(cursor)?;
+    cursor
+        .advance_if_match(&TokenType::RightParen)
+        .ok_or_else(|| build_error("Expect ')' after while condition.", cursor.peek().line))?;
+
+    let body = Box::new(statement(cursor)?);
+    Ok(Stmt::While { condition, body })
 }
 
 fn expression_statement(cursor: &mut TokenCursor) -> StmtResult {

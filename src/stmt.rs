@@ -12,7 +12,7 @@ pub enum Stmt {
     If {
         condition: Expr,
         then_branch: Box<Stmt>,
-        else_branch: Option<Box<Stmt>>
+        else_branch: Option<Box<Stmt>>,
     },
     Print {
         expression: Expr,
@@ -20,5 +20,9 @@ pub enum Stmt {
     Var {
         name: Token,
         initializer: Expr,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
     },
 }

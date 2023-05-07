@@ -81,6 +81,7 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
         } => if_statement(condition, then_branch, else_branch, env),
         Stmt::Print { expression } => print_statement(expression, env),
         Stmt::Var { name, initializer } => var_statement(name, initializer, env),
+        Stmt::While { condition, body } => while_statement(condition, body, env),
     }
 }
 
@@ -129,6 +130,13 @@ fn print_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
 fn var_statement(name: &Token, initializer: &Expr, env: &mut Environment) -> UnitResult {
     let result = evaluate(initializer, env)?;
     env.define(name.lexeme.clone(), result);
+    Ok(())
+}
+
+fn while_statement(condition: &Expr, body: &Stmt, env: &mut Environment) -> UnitResult {
+    while is_truthy(&evaluate(condition, env)?) {
+        execute_statement(body, env)?;
+    }
     Ok(())
 }
 
