@@ -159,3 +159,21 @@ fn for_loop() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn function_declaration() -> TestResult {
+    let code = "\
+        fun say(n) {
+            if (n > 2) print \"big one\";
+            print n;
+        }
+        say(3);";
+
+    let output = run(code)?;
+    assert_eq!(
+        "big one\n3\n",
+        output
+    );
+
+    Ok(())
+}

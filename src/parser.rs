@@ -22,9 +22,56 @@ pub fn parse(tokens: &Vec<Token>) -> GenericResult<Vec<Stmt>> {
 
 fn declaration(cursor: &mut TokenCursor) -> StmtResult {
     match cursor.peek().token_type {
+        TokenType::Fun => function(cursor),
         TokenType::Var => var_declaration(cursor),
         _ => statement(cursor),
     }
+}
+
+fn function(cursor: &mut TokenCursor) -> StmtResult {
+    cursor
+        .advance_if_match(&TokenType::Fun)
+        .ok_or_else(|| build_error("Function declaration with invalid token.", cursor.peek().line))?;
+
+    let name = if matches!(cursor.peek().token_type, TokenType::Identifier(_)) {
+        let clone = cursor.peek().clone();
+        cursor.advance();
+        clone
+    } else {
+        return Err(Box::new(build_error("Expect function name.", cursor.peek().line)));
+    };
+
+    // parse the parameter list
+    let mut params = Vec::new();
+    cursor
+        .advance_if_match(&TokenType::LeftParen)
+        .ok_or_else(|| build_error("Expect '(' after function name.", cursor.peek().line))?;
+    if cursor.peek().token_type != TokenType::RightParen {
+        loop {
+            if matches!(cursor.peek().token_type, TokenType::Identifier(_)) {
+                params.push(cursor.peek().clone());
+                cursor.advance();
+            } else {
+                return Err(Box::new(build_error("Expected identifiers only in parameter list.", cursor.peek().line)));
+            }
+            
+            // keep grabbing the next argument as long as the following token is a comma
+            if cursor.advance_if_match(&TokenType::Comma).is_none() {
+                break;
+            }
+        }
+    }
+    cursor
+        .advance_if_match(&TokenType::RightParen)
+        .ok_or_else(|| build_error("Expect ')' after parameters.", cursor.peek().line))?;
+
+    // parse the function body
+    cursor
+        .advance_if_match(&TokenType::LeftBrace)
+        .ok_or_else(|| build_error("Expect '{' before function body.", cursor.peek().line))?;
+    let body = Box::new(block_statement(cursor)?);
+
+    Ok(Stmt::Function { name, params, body })
 }
 
 fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
@@ -136,7 +183,7 @@ fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
     let expression = expression(cursor)?;
     cursor
         .advance_if_match(&TokenType::Semicolon)
-        .ok_or_else(|| build_error("Expect ';' after expression.", cursor.peek().line))?;
+        .ok_or_else(|| build_error("Expect ';' after print statement.", cursor.peek().line))?;
     Ok(Stmt::Print { expression })
 }
 
@@ -279,7 +326,37 @@ fn unary(cursor: &mut TokenCursor) -> ExprResult {
         });
     }
 
-    primary(cursor)
+    call(cursor)
+}
+
+fn call(cursor: &mut TokenCursor) -> ExprResult {
+    let mut expr = primary(cursor)?;
+
+    if cursor.advance_if_match(&TokenType::LeftParen).is_some() {
+        expr = finish_call(cursor, expr)?;
+    }
+
+    Ok(expr)
+}
+
+fn finish_call(cursor: &mut TokenCursor, callee: Expr) -> ExprResult {
+    let mut arguments = Vec::new();
+
+    if cursor.peek().token_type != TokenType::RightParen {
+        loop {
+            arguments.push(expression(cursor)?);
+            // keep grabbing the next argument as long as the following token is a comma
+            if cursor.advance_if_match(&TokenType::Comma).is_none() {
+                break;
+            }
+        }
+    }
+
+    let paren = cursor
+        .advance_if_match(&TokenType::RightParen)
+        .ok_or_else(|| build_error("Expect ')' after expression.", cursor.peek().line))?;
+
+    Ok(Expr::Call { callee: Box::new(callee), paren, arguments })
 }
 
 fn primary(cursor: &mut TokenCursor) -> ExprResult {

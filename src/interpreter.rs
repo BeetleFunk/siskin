@@ -7,13 +7,43 @@ use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
 use std::collections::HashMap;
+use std::fmt;
 use std::io::Write;
 
 type UnitResult = GenericResult<()>;
-type ValueResult = GenericResult<LiteralValue>;
+type ValueResult = GenericResult<SiskinValue>;
+
+// TODO: cannot clone traits easily, how to handle function assignment/copying?
+trait Callable {
+    fn call(&self) -> SiskinValue;
+    fn arity(&self) -> u32;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum SiskinValue {
+    Function,
+    NativeFunction,
+    Literal(LiteralValue),
+}
+
+impl fmt::Display for SiskinValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            Self::Function => "Function".to_string(),
+            Self::NativeFunction => "NativeFunction".to_string(),
+            Self::Literal(value) => value.to_string(),
+        })
+    }
+}
+
+impl From<LiteralValue> for SiskinValue {
+    fn from(value: LiteralValue) -> SiskinValue {
+        SiskinValue::Literal(value)
+    }
+}
 
 pub struct Environment<'a> {
-    stack: Vec<HashMap<String, LiteralValue>>,
+    stack: Vec<HashMap<String, SiskinValue>>,
     output_writer: &'a mut dyn Write,
 }
 
@@ -34,7 +64,7 @@ impl<'a> Environment<'a> {
         self.stack.pop();
     }
 
-    fn define(&mut self, name: String, value: LiteralValue) {
+    fn define(&mut self, name: String, value: SiskinValue) {
         let frame = self
             .stack
             .last_mut()
@@ -42,7 +72,7 @@ impl<'a> Environment<'a> {
         frame.insert(name, value);
     }
 
-    fn assign(&mut self, name: String, value: LiteralValue) -> UnitResult {
+    fn assign(&mut self, name: String, value: SiskinValue) -> UnitResult {
         if let Some(frame) = self.stack.iter_mut().rev().find(|x| x.contains_key(&name)) {
             frame.insert(name, value);
             Ok(())
@@ -53,7 +83,7 @@ impl<'a> Environment<'a> {
         }
     }
 
-    fn get(&self, name: &str) -> Option<&LiteralValue> {
+    fn get(&self, name: &str) -> Option<&SiskinValue> {
         for frame in self.stack.iter().rev() {
             if let Some(value) = frame.get(name) {
                 return Some(value);
@@ -74,6 +104,7 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
     match statement {
         Stmt::Block { statements } => block_statement(statements, env),
         Stmt::Expression { expression } => expression_statement(expression, env),
+        Stmt::Function { name, params, body } => function_statement(name, params, body, env),
         Stmt::If {
             condition,
             then_branch,
@@ -102,6 +133,11 @@ fn block_statement(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult 
 
 fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
     evaluate(expression, env)?;
+    Ok(())
+}
+
+fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
+    // TODO: store function representation
     Ok(())
 }
 
@@ -148,6 +184,11 @@ fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
             operator,
             right,
         } => evaluate_binary(left, operator, right, env),
+        Expr::Call {
+            callee,
+            paren,
+            arguments,
+        } => evaluate_call(callee, paren, arguments, env),
         Expr::Grouping { expression } => evaluate_grouping(expression, env),
         Expr::Literal { value } => evaluate_literal(value),
         Expr::Logical {
@@ -216,7 +257,26 @@ fn evaluate_binary(
             ),
         }
     };
-    Ok(evaluated)
+    Ok(SiskinValue::from(evaluated))
+}
+
+fn evaluate_call(
+    callee: &Box<Expr>,
+    paren: &Token,
+    arguments: &Vec<Expr>,
+    env: &mut Environment,
+) -> ValueResult {
+    let callee = evaluate(callee, env)?;
+    let arguments: Vec<ValueResult> = arguments.iter().map(|arg| evaluate(arg, env)).collect();
+
+    // WORK IN PROGRESS: if errors occurred during evaluation just return the first one
+    for result in arguments {
+        if result.is_err() {
+            return result;
+        }
+    }
+
+    return Ok(SiskinValue::from(LiteralValue::Nil));
 }
 
 fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResult {
@@ -224,7 +284,7 @@ fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResu
 }
 
 fn evaluate_literal(value: &LiteralValue) -> ValueResult {
-    Ok(value.clone())
+    Ok(SiskinValue::Literal(value.clone()))
 }
 
 fn evaluate_logical(
@@ -274,7 +334,7 @@ fn evaluate_unary(operator: &Token, right: &Box<Expr>, env: &mut Environment) ->
             operator
         ),
     };
-    Ok(evaluated)
+    Ok(SiskinValue::from(evaluated))
 }
 
 fn evaluate_variable(name: &Token, env: &Environment) -> ValueResult {
@@ -288,17 +348,17 @@ fn evaluate_variable(name: &Token, env: &Environment) -> ValueResult {
     }
 }
 
-fn extract_number(value: &LiteralValue) -> Option<f64> {
+fn extract_number(value: &SiskinValue) -> Option<f64> {
     match value {
-        LiteralValue::Number(result) => Some(*result),
+        SiskinValue::Literal(LiteralValue::Number(result)) => Some(*result),
         _ => None,
     }
 }
 
-fn is_truthy(value: &LiteralValue) -> bool {
+fn is_truthy(value: &SiskinValue) -> bool {
     match value {
-        LiteralValue::Nil => false,
-        LiteralValue::Boolean(value) => *value,
+        SiskinValue::Literal(LiteralValue::Nil) => false,
+        SiskinValue::Literal(LiteralValue::Boolean(value)) => *value,
         _ => true,
     }
 }
