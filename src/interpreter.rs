@@ -21,7 +21,7 @@ trait Callable {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SiskinValue {
-    Function,
+    Function{ name: Token, params: Vec<Token>, body: Stmt },
     NativeFunction,
     Literal(LiteralValue),
 }
@@ -29,7 +29,7 @@ enum SiskinValue {
 impl fmt::Display for SiskinValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", match self {
-            Self::Function => "Function".to_string(),
+            Self::Function{..} => "Function".to_string(),
             Self::NativeFunction => "NativeFunction".to_string(),
             Self::Literal(value) => value.to_string(),
         })
@@ -137,7 +137,8 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
 }
 
 fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
-    // TODO: store function representation
+    let function = SiskinValue::Function { name: name.clone(), params: params.clone(), body: body.clone() };
+    env.define(name.lexeme.clone(), function);
     Ok(())
 }
 
@@ -267,16 +268,39 @@ fn evaluate_call(
     env: &mut Environment,
 ) -> ValueResult {
     let callee = evaluate(callee, env)?;
-    let arguments: Vec<ValueResult> = arguments.iter().map(|arg| evaluate(arg, env)).collect();
-
+    let evaluated_args: Vec<ValueResult> = arguments.iter().map(|arg| evaluate(arg, env)).collect();
+    let mut unwrapped_args = Vec::new();
     // WORK IN PROGRESS: if errors occurred during evaluation just return the first one
-    for result in arguments {
-        if result.is_err() {
+    for result in evaluated_args {
+        if let Ok(argument) = result {
+            unwrapped_args.push(argument);
+        } else {
             return result;
         }
     }
 
-    return Ok(SiskinValue::from(LiteralValue::Nil));
+    let return_value = run_function(callee, unwrapped_args, paren.line, env)?;
+
+    return Ok(return_value);
+}
+
+fn run_function(function: SiskinValue, arguments: Vec<SiskinValue>, line: u32, env: &mut Environment) -> ValueResult {
+    match function {
+        SiskinValue::Function{ name, params, body} => {
+            env.push();
+            for i in 0..params.len() {
+                env.define(params[i].lexeme.clone(), arguments[i].clone());
+            }
+            // TODO: return value plumbing in general, especially early returns!
+            let return_value = execute_statement(&body, env);
+            // TODO: make sure pop happens even after errors
+            env.pop();
+            Ok(SiskinValue::from(LiteralValue::Nil))
+        }
+        _ => Err(Box::new(build_error(
+            "Cannot call non-function expression.",
+            line)))
+    }
 }
 
 fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResult {
@@ -284,7 +308,7 @@ fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResu
 }
 
 fn evaluate_literal(value: &LiteralValue) -> ValueResult {
-    Ok(SiskinValue::Literal(value.clone()))
+    Ok(SiskinValue::from(value.clone()))
 }
 
 fn evaluate_logical(

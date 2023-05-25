@@ -3,7 +3,7 @@ use crate::scanner::TokenType;
 
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Assign {
         name: Token,

@@ -1,7 +1,7 @@
 use crate::expr::Expr;
 use crate::scanner::Token;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Block {
         statements: Vec<Stmt>,
