@@ -28,18 +28,41 @@ impl PartialEq for NativeFunc {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Reference {
+    key: usize
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SiskinValue {
-    Function{ name: Token, params: Vec<Token>, body: Stmt },
+    FunctionHandle(Reference),
+    Literal(LiteralValue),
+}
+
+#[derive(Debug)]
+pub struct SiskinFunction {
+    name: Token,
+    params: Vec<Token>,
+    body: Stmt,
+    captured_vars: HashMap<String, Reference>
+}
+
+// #[derive(Debug, Clone, PartialEq)]
+enum HeapValue {
+    Function(SiskinFunction),
     NativeFunction(NativeFunc),
     Literal(LiteralValue),
+}
+
+pub struct HeapObject {
+    value: HeapValue,
+    ref_count: usize
 }
 
 impl fmt::Display for SiskinValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", match self {
-            Self::Function{..} => "Function".to_string(),
-            Self::NativeFunction(_) => "NativeFunction".to_string(),
+            Self::FunctionHandle{..} => "FunctionHandle".to_string(),
             Self::Literal(value) => value.to_string(),
         })
     }
@@ -51,14 +74,9 @@ impl From<LiteralValue> for SiskinValue {
     }
 }
 
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct Reference {
-//     key: usize
-// }
-
 pub struct Environment<'a> {
-    //data: HashMap<Reference, SiskinValue>,
-    stack: Vec<HashMap<String, SiskinValue>>,
+    heap: HashMap<Reference, HeapObject>,
+    stack: Vec<HashMap<String, Reference>>,
     pub output_writer: &'a mut dyn Write,
 }
 
@@ -66,6 +84,7 @@ impl<'a> Environment<'a> {
     pub fn new(output_writer: &'a mut dyn Write) -> Environment<'a> {
         // initialize the global environment map as the first entry on the stack
         Environment {
+            heap: HashMap::new(),
             stack: vec![HashMap::new()],
             output_writer,
         }
@@ -76,7 +95,19 @@ impl<'a> Environment<'a> {
     }
 
     pub fn pop(&mut self) {
-        self.stack.pop();
+        let frame = self.stack.pop().expect("Attempted to pop empty Environment stack."); // panic here because this would indicate a bug in the interpreter
+        // update ref counts and remove unused vars
+        for reference in frame.values() {
+            let object = self.heap.get_mut(reference).expect("Stack frame was holding a reference not found on the heap.");
+            if object.ref_count == 1 {
+                if let HeapValue::Function(func) = object.value {
+                    // TODO: recursive ref count cleanup for captured vars
+                }
+                self.heap.remove(reference);
+            } else {
+                object.ref_count = object.ref_count - 1;
+            }
+        }
     }
 
     pub fn define(&mut self, name: String, value: SiskinValue) {

@@ -170,10 +170,28 @@ fn function_declaration() -> TestResult {
         say(3);";
 
     let output = run(code)?;
-    assert_eq!(
-        "big one\n3\n",
-        output
-    );
+    assert_eq!("big one\n3\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn function_capture() -> TestResult {
+    let code = "\
+        var funcRef;
+        {
+            var divisor = 2;
+            fun printHalf(n) {
+                var result = n / divisor;
+                print result;
+            }
+            funcRef = printHalf;
+        }
+        var divisor = 300;
+        funcRef(8);";
+
+    let output = run(code)?;
+    assert_eq!("4\n", output);
 
     Ok(())
 }
