@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::environment::Environment;
+use crate::environment::SiskinFunction;
 use crate::environment::SiskinValue;
 use crate::error::BasicError;
 use crate::error::GenericResult;
@@ -55,8 +58,9 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
 }
 
 fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
-    let function = SiskinValue::Function { name: name.clone(), params: params.clone(), body: body.clone() };
-    env.define(name.lexeme.clone(), function);
+    // TODO: capture any variables referenced in the body
+    let function = SiskinFunction { name: name.clone(), params: params.clone(), body: body.clone(), captured_vars: HashMap::new() };
+    env.define(name.lexeme.clone(), SiskinValue::Function(function));
     Ok(())
 }
 
@@ -202,15 +206,16 @@ fn evaluate_call(
     return Ok(return_value);
 }
 
-fn run_function(function: SiskinValue, arguments: Vec<SiskinValue>, line: u32, env: &mut Environment) -> ValueResult {
-    match function {
-        SiskinValue::Function{ name, params, body} => {
+fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line: u32, env: &mut Environment) -> ValueResult {
+    match function_handle {
+        SiskinValue::FunctionHandle(_) => {
+            let function = env.get_function(&function_handle);
             env.push();
-            for i in 0..params.len() {
-                env.define(params[i].lexeme.clone(), arguments[i].clone());
+            for i in 0..function.params.len() {
+                env.define(function.params[i].lexeme.clone(), arguments[i].clone());
             }
             // TODO: return value plumbing in general, especially early returns!
-            let return_value = execute_statement(&body, env);
+            let return_value = execute_statement(&function.body, env);
             // TODO: make sure pop happens even after errors
             env.pop();
             Ok(SiskinValue::from(LiteralValue::Nil))

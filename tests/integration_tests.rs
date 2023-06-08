@@ -176,6 +176,21 @@ fn function_declaration() -> TestResult {
 }
 
 #[test]
+fn first_class_functions() -> TestResult {
+    let code = "\
+        fun say(n) {
+            print n;
+        }
+        var sayAlias = say;
+        sayAlias(\"test string\");";
+
+    let output = run(code)?;
+    assert_eq!("test string\n", output);
+
+    Ok(())
+}
+
+#[test]
 fn function_capture() -> TestResult {
     let code = "\
         var funcRef;
