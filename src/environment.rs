@@ -107,7 +107,7 @@ impl<'a> Environment<'a> {
             .expect("Stack frame was holding a reference not found on the heap.");
         // if count would go to zero, remove the entry entirely
         if object.ref_count == 1 {
-            if (DIAGNOSTICS) { writeln!(self.output_writer, "Removing object from heap: {}", reference.id).expect("Writing to program output should always succeed."); }
+            if DIAGNOSTICS { writeln!(self.output_writer, "Removing object from heap: {}", reference.id).expect("Writing to program output should always succeed."); }
 
             // remove the object first to take ownership and release the mutable borrow
             let object = self.heap.remove(reference).expect("Object should be guaranteed to exist in release phase.");
@@ -117,7 +117,7 @@ impl<'a> Environment<'a> {
                 }
             }
         } else {
-            if (DIAGNOSTICS) { writeln!(self.output_writer, "Decrementing reference count (new refcount = {}) on object: {}", object.ref_count - 1, reference.id).expect("Writing to program output should always succeed."); }
+            if DIAGNOSTICS { writeln!(self.output_writer, "Decrementing reference count (new refcount = {}) on object: {}", object.ref_count - 1, reference.id).expect("Writing to program output should always succeed."); }
             object.ref_count -= 1;
         }
     }
@@ -184,7 +184,7 @@ impl<'a> Environment<'a> {
 
         // update ref counts and remove unused vars
         for (var_name, reference) in frame {
-            if (DIAGNOSTICS) { writeln!(self.output_writer, "Removing stack var: {}", var_name).expect("Writing to program output should always succeed."); }
+            if DIAGNOSTICS { writeln!(self.output_writer, "Removing stack var: {}", var_name).expect("Writing to program output should always succeed."); }
             self.decrement_refcount(&reference);
         }
     }

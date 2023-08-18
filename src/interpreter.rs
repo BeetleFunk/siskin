@@ -7,6 +7,7 @@ use crate::error::BasicError;
 use crate::error::GenericResult;
 use crate::expr::Expr;
 use crate::expr::LiteralValue;
+use crate::resolver::resolve_function_captures;
 use crate::scanner::Token;
 use crate::scanner::TokenType;
 use crate::stmt::Stmt;
@@ -59,6 +60,13 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
 
 fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
     // TODO: capture any variables referenced in the body
+    let captured_vars = resolve_function_captures(params, body)?;
+
+    // for capture in captured_vars {
+    //     writeln!(env.output_writer, "Captured var name: {}", capture.lexeme)
+    //     .expect("Writing to program output should always succeed.");
+    // }
+
     let function = SiskinFunction { name: name.clone(), params: params.clone(), body: body.clone(), captured_vars: HashMap::new() };
     env.define(name.lexeme.clone(), SiskinValue::Function(function));
     Ok(())
@@ -214,6 +222,10 @@ fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line:
             for i in 0..function.params.len() {
                 env.define(function.params[i].lexeme.clone(), arguments[i].clone());
             }
+
+            // TODO: make captured variables available in current scope
+            //function.captured_vars
+
             // TODO: return value plumbing in general, especially early returns!
             let return_value = execute_statement(&function.body, env);
             // TODO: make sure pop happens even after errors

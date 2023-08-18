@@ -2,6 +2,7 @@ mod environment;
 mod expr;
 mod interpreter;
 mod parser;
+mod resolver;
 mod scanner;
 mod stmt;
 
