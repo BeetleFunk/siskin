@@ -218,22 +218,46 @@ impl<'a> Environment<'a> {
     }
 
     pub fn get(&self, name: &str) -> Option<SiskinValue> {
+        if let Some(reference) = self.get_reference(name) {
+            let object = self.heap.get(&reference).expect("Stack frame was holding a reference not found on the heap.");
+            let value = match &object.value {
+                HeapValue::Literal(literal) => SiskinValue::Literal(literal.clone()),
+                HeapValue::Function(_) | HeapValue::NativeFunction(_) => {
+                    SiskinValue::FunctionHandle(reference.clone())
+                }
+            };
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_reference(&self, name: &str) -> Option<Reference> {
         for frame in self.stack.iter().rev() {
             if let Some(reference) = frame.get(name) {
-                let object = self
-                    .heap
-                    .get(reference)
-                    .expect("Stack frame was holding a reference not found on the heap.");
-                let value = match &object.value {
-                    HeapValue::Literal(literal) => SiskinValue::Literal(literal.clone()),
-                    HeapValue::Function(_) | HeapValue::NativeFunction(_) => {
-                        SiskinValue::FunctionHandle(reference.clone())
-                    }
-                };
-                return Some(value);
+                return Some(reference.clone());
             }
         }
         None
+    }
+
+    pub fn capture_reference(&mut self, name: String, reference: Reference) {
+        let object = self
+            .heap
+            .get_mut(&reference)
+            .expect("Captured reference must exist on the heap.");
+
+        let frame = self
+            .stack
+            .last_mut()
+            .expect("There should always be at least one scope frame on Environment stack."); // panic here because this would indicate a bug in the interpreter
+        let previous_entry = frame.insert(name, reference);
+        if previous_entry.is_some() {
+            panic!("Illegal capture of a reference under a symbol name that already exists.");
+        }
+
+        // increment the count after placing the new entry on the stack
+        object.ref_count += 1;
     }
 
     // TODO: can this special case be avoided with a standard interface for interpreter to read reference versus value?

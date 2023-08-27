@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::environment::Environment;
+use crate::environment::Reference;
 use crate::environment::SiskinFunction;
 use crate::environment::SiskinValue;
 use crate::error::BasicError;
@@ -59,15 +60,22 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
 }
 
 fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
-    // TODO: capture any variables referenced in the body
-    let captured_vars = resolve_function_captures(params, body)?;
+    let captured_names = resolve_function_captures(params, body)?;
+    let mut captured_vars: HashMap<String, Reference> = HashMap::new();
+    for capture in captured_names {
+        if let Some(reference) = env.get_reference(&capture.lexeme) {
+            captured_vars.insert(capture.lexeme, reference);
+        } else {
+            return Err(Box::new(build_error(
+                &format!("Could not locate capture variable ({}) in function ({}).", capture.lexeme, name.lexeme),
+                name.line,
+            )))
+        }
 
-    // for capture in captured_vars {
-    //     writeln!(env.output_writer, "Captured var name: {}", capture.lexeme)
-    //     .expect("Writing to program output should always succeed.");
-    // }
+        //writeln!(env.output_writer, "Captured var name: {}", capture.lexeme).expect("Writing to program output should always succeed.");
+    }
 
-    let function = SiskinFunction { name: name.clone(), params: params.clone(), body: body.clone(), captured_vars: HashMap::new() };
+    let function = SiskinFunction { name: name.clone(), params: params.clone(), body: body.clone(), captured_vars };
     env.define(name.lexeme.clone(), SiskinValue::Function(function));
     Ok(())
 }
@@ -223,8 +231,10 @@ fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line:
                 env.define(function.params[i].lexeme.clone(), arguments[i].clone());
             }
 
-            // TODO: make captured variables available in current scope
-            //function.captured_vars
+            // make captured variables available in current scope
+            for capture in function.captured_vars {
+                env.capture_reference(capture.0, capture.1);
+            }
 
             // TODO: return value plumbing in general, especially early returns!
             let return_value = execute_statement(&function.body, env);
