@@ -1,97 +1,20 @@
+use std::collections::HashMap;
+
+use crate::environment::Environment;
+use crate::environment::Reference;
+use crate::environment::SiskinFunction;
+use crate::environment::SiskinValue;
 use crate::error::BasicError;
 use crate::error::GenericResult;
 use crate::expr::Expr;
 use crate::expr::LiteralValue;
+use crate::resolver::resolve_function_captures;
 use crate::scanner::Token;
 use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
-use std::collections::HashMap;
-use std::fmt;
-use std::io::Write;
-
 type UnitResult = GenericResult<()>;
 type ValueResult = GenericResult<SiskinValue>;
-
-// TODO: cannot clone traits easily, how to handle function assignment/copying?
-trait Callable {
-    fn call(&self) -> SiskinValue;
-    fn arity(&self) -> u32;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum SiskinValue {
-    Function{ name: Token, params: Vec<Token>, body: Stmt },
-    NativeFunction,
-    Literal(LiteralValue),
-}
-
-impl fmt::Display for SiskinValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            Self::Function{..} => "Function".to_string(),
-            Self::NativeFunction => "NativeFunction".to_string(),
-            Self::Literal(value) => value.to_string(),
-        })
-    }
-}
-
-impl From<LiteralValue> for SiskinValue {
-    fn from(value: LiteralValue) -> SiskinValue {
-        SiskinValue::Literal(value)
-    }
-}
-
-pub struct Environment<'a> {
-    stack: Vec<HashMap<String, SiskinValue>>,
-    output_writer: &'a mut dyn Write,
-}
-
-impl<'a> Environment<'a> {
-    pub fn new(output_writer: &'a mut dyn Write) -> Environment<'a> {
-        // initialize the global environment map as the first entry on the stack
-        Environment {
-            stack: vec![HashMap::new()],
-            output_writer,
-        }
-    }
-
-    fn push(&mut self) {
-        self.stack.push(HashMap::new());
-    }
-
-    fn pop(&mut self) {
-        self.stack.pop();
-    }
-
-    fn define(&mut self, name: String, value: SiskinValue) {
-        let frame = self
-            .stack
-            .last_mut()
-            .expect("Missing global scope frame from Environment stack."); // panic here because this would indicate a bug in the interpreter
-        frame.insert(name, value);
-    }
-
-    fn assign(&mut self, name: String, value: SiskinValue) -> UnitResult {
-        if let Some(frame) = self.stack.iter_mut().rev().find(|x| x.contains_key(&name)) {
-            frame.insert(name, value);
-            Ok(())
-        } else {
-            Err(Box::new(BasicError::new(&format!(
-                "Undefined variable ({name})"
-            ))))
-        }
-    }
-
-    fn get(&self, name: &str) -> Option<&SiskinValue> {
-        for frame in self.stack.iter().rev() {
-            if let Some(value) = frame.get(name) {
-                return Some(value);
-            }
-        }
-        None
-    }
-}
 
 pub fn execute(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult {
     for statement in statements {
@@ -137,8 +60,23 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
 }
 
 fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
-    let function = SiskinValue::Function { name: name.clone(), params: params.clone(), body: body.clone() };
-    env.define(name.lexeme.clone(), function);
+    let captured_names = resolve_function_captures(params, body)?;
+    let mut captured_vars: HashMap<String, Reference> = HashMap::new();
+    for capture in captured_names {
+        if let Some(reference) = env.get_reference(&capture.lexeme) {
+            captured_vars.insert(capture.lexeme, reference);
+        } else {
+            return Err(Box::new(build_error(
+                &format!("Could not locate capture variable ({}) in function ({}).", capture.lexeme, name.lexeme),
+                name.line,
+            )))
+        }
+
+        //writeln!(env.output_writer, "Captured var name: {}", capture.lexeme).expect("Writing to program output should always succeed.");
+    }
+
+    let function = SiskinFunction { name: name.clone(), params: params.clone(), body: body.clone(), captured_vars };
+    env.define(name.lexeme.clone(), SiskinValue::Function(function));
     Ok(())
 }
 
@@ -284,15 +222,22 @@ fn evaluate_call(
     return Ok(return_value);
 }
 
-fn run_function(function: SiskinValue, arguments: Vec<SiskinValue>, line: u32, env: &mut Environment) -> ValueResult {
-    match function {
-        SiskinValue::Function{ name, params, body} => {
+fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line: u32, env: &mut Environment) -> ValueResult {
+    match function_handle {
+        SiskinValue::FunctionHandle(_) => {
+            let function = env.get_function(&function_handle);
             env.push();
-            for i in 0..params.len() {
-                env.define(params[i].lexeme.clone(), arguments[i].clone());
+            for i in 0..function.params.len() {
+                env.define(function.params[i].lexeme.clone(), arguments[i].clone());
             }
+
+            // make captured variables available in current scope
+            for capture in function.captured_vars {
+                env.capture_reference(capture.0, capture.1);
+            }
+
             // TODO: return value plumbing in general, especially early returns!
-            let return_value = execute_statement(&body, env);
+            let return_value = execute_statement(&function.body, env);
             // TODO: make sure pop happens even after errors
             env.pop();
             Ok(SiskinValue::from(LiteralValue::Nil))

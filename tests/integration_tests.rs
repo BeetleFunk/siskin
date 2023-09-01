@@ -55,6 +55,23 @@ fn variable_scoping() -> TestResult {
 }
 
 #[test]
+fn reassignment() -> TestResult {
+    let code = "\
+        var a = \"original\";\n\
+        a = \"updated\";\n\
+        print a;";
+
+    let output = run(code)?;
+
+    let expected = "\
+        updated\n";
+
+    assert_eq!(expected, output);
+
+    Ok(())
+}
+
+#[test]
 fn if_statement_true() -> TestResult {
     let code = "\
         var a = \"do it\";\n\
@@ -170,10 +187,67 @@ fn function_declaration() -> TestResult {
         say(3);";
 
     let output = run(code)?;
-    assert_eq!(
-        "big one\n3\n",
-        output
-    );
+    assert_eq!("big one\n3\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn first_class_functions() -> TestResult {
+    let code = "\
+        fun say(n) {
+            print n;
+        }
+        var sayAlias = say;
+        sayAlias(\"test string\");";
+
+    let output = run(code)?;
+    assert_eq!("test string\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn function_capture() -> TestResult {
+    let code = "\
+        var funcRef;
+        {
+            var divisor = 2;
+            fun printHalf(n) {
+                var result = n / divisor;
+                print result;
+            }
+            funcRef = printHalf;
+        }
+        var divisor = 300;
+        funcRef(8);";
+
+    let output = run(code)?;
+    assert_eq!("4\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn capture_with_reassignment() -> TestResult {
+    let code = "\
+        var funcRef;
+        {
+            var divisor = 2;
+            fun printDivisionResult(n) {
+                var result = n / divisor;
+                print result;
+            }
+            printDivisionResult(32);
+            divisor = 8;
+            funcRef = printDivisionResult;
+            printDivisionResult(32);
+        }
+        var divisor = 400; // not captured and shouldn't affect the function
+        funcRef(32);";
+
+    let output = run(code)?;
+    assert_eq!("16\n4\n4\n", output);
 
     Ok(())
 }
