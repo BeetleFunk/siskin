@@ -53,7 +53,7 @@ pub struct SiskinFunction {
 // #[derive(Debug, Clone, PartialEq)]
 enum HeapValue {
     Function(SiskinFunction),
-    NativeFunction(NativeFunc),
+    //NativeFunction(NativeFunc),
     Literal(LiteralValue),
 }
 
@@ -201,16 +201,56 @@ impl<'a> Environment<'a> {
         }
     }
 
+    // TODO: big hacks in here to make function variable capture work correctly, plenty of potential for improvement
     pub fn assign(&mut self, name: String, value: SiskinValue) -> GenericResult<()> {
-        let reference = self.add_or_create_reference(value);
-        if let Some(frame) = self.stack.iter_mut().rev().find(|x| x.contains_key(&name)) {
-            let replaced_ref = frame
-                .insert(name, reference)
-                .expect("Check should have prevented assigning to uninitialized variable.");
-            self.decrement_refcount(&replaced_ref);
+        if let Some(reference) = self.get_reference(&name) {
+            
+            let new_value = match value {
+                SiskinValue::Literal(literal) => HeapValue::Literal(literal),
+                SiskinValue::Function(function) => HeapValue::Function(function),
+                SiskinValue::FunctionHandle(handle) => {
+                    let object = self
+                        .heap
+                        .get(&handle)
+                        .expect("Function handle was holding a reference not found on the heap.");
+                    match &object.value {
+                        HeapValue::Function(func) => {
+                            let func_clone = func.clone();
+                            // increment ref count for all captured vars
+                            for captured in func_clone.captured_vars.values() {
+                                let object = self
+                                    .heap
+                                    .get_mut(&captured)
+                                    .expect("Captured variables included a reference that was not on the heap.");
+                                object.ref_count += 1;
+                            }
+                            HeapValue::Function(func_clone)
+                        }
+                        _ => panic!("Not implemented function type for heap value."),
+                    }
+                }
+            };
+
+            let entry = self.heap.get_mut(&reference).expect("Mapped reference should exist.");
+
+            let cleanup_refs: Option<Vec<Reference>> = if let HeapValue::Function(func) = &entry.value {
+                let mut captured = Vec::new();
+                for capture in func.captured_vars.values() {
+                    captured.push(capture.clone());
+                }
+                Option::Some(captured)
+            } else {
+                Option::None
+            };
+
+            entry.value = new_value;
+
+            if let Some(cleanup_refs) = cleanup_refs {
+                cleanup_refs.iter().for_each(|reference| self.decrement_refcount(reference));
+            }
+
             Ok(())
         } else {
-            self.decrement_refcount(&reference);
             Err(Box::new(BasicError::new(&format!(
                 "Undefined variable ({name})"
             ))))
@@ -222,9 +262,7 @@ impl<'a> Environment<'a> {
             let object = self.heap.get(&reference).expect("Stack frame was holding a reference not found on the heap.");
             let value = match &object.value {
                 HeapValue::Literal(literal) => SiskinValue::Literal(literal.clone()),
-                HeapValue::Function(_) | HeapValue::NativeFunction(_) => {
-                    SiskinValue::FunctionHandle(reference.clone())
-                }
+                HeapValue::Function(_) => SiskinValue::FunctionHandle(reference.clone())
             };
             Some(value)
         } else {
