@@ -416,7 +416,7 @@ impl<'a> TokenCursor<'a> {
     }
 
     fn at_end(&self) -> bool {
-        matches!(self.tokens[self.index].token_type, TokenType::EOF)
+        matches!(self.tokens[self.index].token_type, TokenType::Eof)
     }
 
     fn advance_if_match(&mut self, token_type: &TokenType) -> Option<Token> {

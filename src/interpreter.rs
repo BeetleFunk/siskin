@@ -16,7 +16,7 @@ use crate::stmt::Stmt;
 type UnitResult = GenericResult<()>;
 type ValueResult = GenericResult<SiskinValue>;
 
-pub fn execute(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult {
+pub fn execute(statements: &[Stmt], env: &mut Environment) -> UnitResult {
     for statement in statements {
         execute_statement(statement, env)?;
     }
@@ -39,7 +39,7 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
     }
 }
 
-fn block_statement(statements: &Vec<Stmt>, env: &mut Environment) -> UnitResult {
+fn block_statement(statements: &[Stmt], env: &mut Environment) -> UnitResult {
     env.push();
     for statement in statements {
         let result = execute_statement(statement, env);
@@ -59,7 +59,7 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
     Ok(())
 }
 
-fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut Environment) -> UnitResult {
+fn function_statement(name: &Token, params: &[Token], body: &Stmt, env: &mut Environment) -> UnitResult {
     let captured_names = resolve_function_captures(params, body)?;
     let mut captured_vars: HashMap<String, Reference> = HashMap::new();
     for capture in captured_names {
@@ -75,14 +75,14 @@ fn function_statement(name: &Token, params: &Vec<Token>, body: &Stmt, env: &mut 
         //writeln!(env.output_writer, "Captured var name: {}", capture.lexeme).expect("Writing to program output should always succeed.");
     }
 
-    let function = SiskinFunction { name: name.clone(), params: params.clone(), body: body.clone(), captured_vars };
+    let function = SiskinFunction { name: name.clone(), params: Vec::from(params), body: body.clone(), captured_vars };
     env.define(name.lexeme.clone(), SiskinValue::Function(function));
     Ok(())
 }
 
 fn if_statement(
     condition: &Expr,
-    then_branch: &Box<Stmt>,
+    then_branch: &Stmt,
     else_branch: &Option<Box<Stmt>>,
     env: &mut Environment,
 ) -> UnitResult {
@@ -140,7 +140,7 @@ fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
     }
 }
 
-fn evaluate_assign(name: &Token, value: &Box<Expr>, env: &mut Environment) -> ValueResult {
+fn evaluate_assign(name: &Token, value: &Expr, env: &mut Environment) -> ValueResult {
     let result = evaluate(value, env)?;
     env.assign(name.lexeme.clone(), result.clone())
         .or_else(|e| Err(build_error(&e.to_string(), name.line)))?;
@@ -148,9 +148,9 @@ fn evaluate_assign(name: &Token, value: &Box<Expr>, env: &mut Environment) -> Va
 }
 
 fn evaluate_binary(
-    left: &Box<Expr>,
+    left: &Expr,
     operator: &Token,
-    right: &Box<Expr>,
+    right: &Expr,
     env: &mut Environment,
 ) -> ValueResult {
     let left_evaluated = evaluate(left, env)?;
@@ -200,9 +200,9 @@ fn evaluate_binary(
 }
 
 fn evaluate_call(
-    callee: &Box<Expr>,
+    callee: &Expr,
     paren: &Token,
-    arguments: &Vec<Expr>,
+    arguments: &[Expr],
     env: &mut Environment,
 ) -> ValueResult {
     let callee = evaluate(callee, env)?;
@@ -248,7 +248,7 @@ fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line:
     }
 }
 
-fn evaluate_grouping(expression: &Box<Expr>, env: &mut Environment) -> ValueResult {
+fn evaluate_grouping(expression: &Expr, env: &mut Environment) -> ValueResult {
     evaluate(expression, env)
 }
 
@@ -257,9 +257,9 @@ fn evaluate_literal(value: &LiteralValue) -> ValueResult {
 }
 
 fn evaluate_logical(
-    left: &Box<Expr>,
+    left: &Expr,
     operator: &Token,
-    right: &Box<Expr>,
+    right: &Expr,
     env: &mut Environment,
 ) -> ValueResult {
     let left_evaluated = evaluate(left, env)?;
@@ -284,7 +284,7 @@ fn evaluate_logical(
     Ok(right_evaluated)
 }
 
-fn evaluate_unary(operator: &Token, right: &Box<Expr>, env: &mut Environment) -> ValueResult {
+fn evaluate_unary(operator: &Token, right: &Expr, env: &mut Environment) -> ValueResult {
     let operand = evaluate(right, env)?;
     let evaluated = match operator.token_type {
         TokenType::Bang => LiteralValue::Boolean(!is_truthy(&operand)),

@@ -11,7 +11,7 @@ pub fn scan_tokens(code: &str) -> GenericResult<Vec<Token>> {
 
     loop {
         tokens.push(next_token(&mut cursor)?);
-        if tokens.last().unwrap().token_type == TokenType::EOF {
+        if tokens.last().unwrap().token_type == TokenType::Eof {
             break Ok(tokens);
         }
     }
@@ -73,7 +73,7 @@ pub enum TokenType {
     While,
 
     // End-Of-File
-    EOF,
+    Eof,
 }
 
 #[derive(Debug)]
@@ -131,7 +131,7 @@ impl Cursor {
         String::from_iter(chars)
     }
 
-    fn chars_at_cursor<'a>(&'a self) -> &'a[char] {
+    fn chars_at_cursor(&self) -> &[char] {
         &self.code[self.begin..self.end]
     }
 }
@@ -215,7 +215,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                 _ => {
                     if current.is_alphabetic() {
                         scan_identifier(cursor)
-                    } else if current.is_digit(10) {
+                    } else if current.is_ascii_digit() {
                         scan_number(cursor)
                     } else {
                         Err(Box::new(build_error(&format!("Unexpected character '{current}'."), cursor.line)))
@@ -225,7 +225,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
         }
     } else {
         Ok(Token {
-            token_type: TokenType::EOF,
+            token_type: TokenType::Eof,
             lexeme: String::from(""),
             line: cursor.line,
         })
@@ -258,7 +258,7 @@ fn scan_identifier(cursor: &mut Cursor) -> TokenResult {
 }
 
 fn scan_number(cursor: &mut Cursor) -> TokenResult {
-    let is_not_digit = |next: char| !next.is_digit(10);
+    let is_not_digit = |next: char| !next.is_ascii_digit();
 
     cursor.buffer_next_until(is_not_digit);
 

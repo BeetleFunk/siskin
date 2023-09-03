@@ -50,7 +50,7 @@ impl VarScopes {
 }
 
 //
-pub fn resolve_function_captures(params: &Vec<Token>, body: &Stmt) -> GenericResult<Vec<Token>> {
+pub fn resolve_function_captures(params: &[Token], body: &Stmt) -> GenericResult<Vec<Token>> {
     let initial_definitions = HashSet::from_iter(params.iter().map(|token| token.lexeme.clone()));
     let mut scope_info = VarScopes::new(initial_definitions);
     resolve_statement(body, &mut scope_info)?;
@@ -73,7 +73,7 @@ fn resolve_statement(statement: &Stmt, scope: &mut VarScopes) -> UnitResult {
     }
 }
 
-fn block_statement(statements: &Vec<Stmt>, scope: &mut VarScopes) -> UnitResult {
+fn block_statement(statements: &[Stmt], scope: &mut VarScopes) -> UnitResult {
     scope.push();
     for statement in statements {
         // assuming we bail completely and don't need to pop the stack if an error occurs in here
@@ -90,7 +90,7 @@ fn expression_statement(expression: &Expr, scope: &mut VarScopes) -> UnitResult 
 
 fn function_statement(
     name: &Token,
-    _params: &Vec<Token>,
+    _params: &[Token],
     body: &Stmt,
     scope: &mut VarScopes,
 ) -> UnitResult {
@@ -100,7 +100,7 @@ fn function_statement(
 
 fn if_statement(
     condition: &Expr,
-    then_branch: &Box<Stmt>,
+    then_branch: &Stmt,
     else_branch: &Option<Box<Stmt>>,
     scope: &mut VarScopes,
 ) -> UnitResult {
@@ -152,14 +152,14 @@ fn resolve_expr(expression: &Expr, scope: &mut VarScopes) -> UnitResult {
     }
 }
 
-fn resolve_assign(_name: &Token, value: &Box<Expr>, scope: &mut VarScopes) -> UnitResult {
+fn resolve_assign(_name: &Token, value: &Expr, scope: &mut VarScopes) -> UnitResult {
     resolve_expr(value, scope)
 }
 
 fn resolve_binary(
-    left: &Box<Expr>,
+    left: &Expr,
     _operator: &Token,
-    right: &Box<Expr>,
+    right: &Expr,
     scope: &mut VarScopes,
 ) -> UnitResult {
     resolve_expr(left, scope)?;
@@ -167,9 +167,9 @@ fn resolve_binary(
 }
 
 fn resolve_call(
-    callee: &Box<Expr>,
+    callee: &Expr,
     _paren: &Token,
-    arguments: &Vec<Expr>,
+    arguments: &[Expr],
     scope: &mut VarScopes,
 ) -> UnitResult {
     resolve_expr(callee, scope)?;
@@ -179,7 +179,7 @@ fn resolve_call(
     Ok(())
 }
 
-fn resolve_grouping(expression: &Box<Expr>, scope: &mut VarScopes) -> UnitResult {
+fn resolve_grouping(expression: &Expr, scope: &mut VarScopes) -> UnitResult {
     resolve_expr(expression, scope)
 }
 
@@ -188,16 +188,16 @@ fn resolve_literal(_value: &LiteralValue) -> UnitResult {
 }
 
 fn resolve_logical(
-    left: &Box<Expr>,
+    left: &Expr,
     _operator: &Token,
-    right: &Box<Expr>,
+    right: &Expr,
     scope: &mut VarScopes,
 ) -> UnitResult {
     resolve_expr(left, scope)?;
     resolve_expr(right, scope)
 }
 
-fn resolve_unary(_operator: &Token, right: &Box<Expr>, scope: &mut VarScopes) -> UnitResult {
+fn resolve_unary(_operator: &Token, right: &Expr, scope: &mut VarScopes) -> UnitResult {
     resolve_expr(right, scope)
 }
 
