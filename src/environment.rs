@@ -7,28 +7,8 @@ use crate::stmt::Stmt;
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Write;
-use std::rc::Rc;
 
 static DIAGNOSTICS: bool = false;
-
-#[derive(Clone)]
-pub struct NativeFunc {
-    function: Rc<dyn Fn() -> SiskinValue>,
-}
-
-impl fmt::Debug for NativeFunc {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: implement this for real
-        write!(f, "Native function debug view")
-    }
-}
-
-impl PartialEq for NativeFunc {
-    fn eq(&self, other: &Self) -> bool {
-        // TODO: implement this for real
-        false
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Reference {
@@ -50,10 +30,8 @@ pub struct SiskinFunction {
     pub captured_vars: HashMap<String, Reference>,
 }
 
-// #[derive(Debug, Clone, PartialEq)]
 enum HeapValue {
     Function(SiskinFunction),
-    //NativeFunction(NativeFunc),
     Literal(LiteralValue),
 }
 
@@ -129,7 +107,7 @@ impl<'a> Environment<'a> {
                     .heap
                     .get_mut(&reference)
                     .expect("Function handle was holding a reference not found on the heap.");
-                object.ref_count = object.ref_count + 1;
+                object.ref_count += 1;
                 reference
             }
             SiskinValue::Literal(value) => {
@@ -151,7 +129,7 @@ impl<'a> Environment<'a> {
                 for captured in func.captured_vars.values() {
                     let object = self
                         .heap
-                        .get_mut(&captured)
+                        .get_mut(captured)
                         .expect("Captured variables included a reference that was not on the heap.");
                     object.ref_count += 1;
                 }
@@ -220,7 +198,7 @@ impl<'a> Environment<'a> {
                             for captured in func_clone.captured_vars.values() {
                                 let object = self
                                     .heap
-                                    .get_mut(&captured)
+                                    .get_mut(captured)
                                     .expect("Captured variables included a reference that was not on the heap.");
                                 object.ref_count += 1;
                             }

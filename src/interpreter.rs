@@ -59,7 +59,12 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult 
     Ok(())
 }
 
-fn function_statement(name: &Token, params: &[Token], body: &Stmt, env: &mut Environment) -> UnitResult {
+fn function_statement(
+    name: &Token,
+    params: &[Token],
+    body: &Stmt,
+    env: &mut Environment,
+) -> UnitResult {
     let captured_names = resolve_function_captures(params, body)?;
     let mut captured_vars: HashMap<String, Reference> = HashMap::new();
     for capture in captured_names {
@@ -67,15 +72,23 @@ fn function_statement(name: &Token, params: &[Token], body: &Stmt, env: &mut Env
             captured_vars.insert(capture.lexeme, reference);
         } else {
             return Err(Box::new(build_error(
-                &format!("Could not locate capture variable ({}) in function ({}).", capture.lexeme, name.lexeme),
+                &format!(
+                    "Could not locate capture variable ({}) in function ({}).",
+                    capture.lexeme, name.lexeme
+                ),
                 name.line,
-            )))
+            )));
         }
 
         //writeln!(env.output_writer, "Captured var name: {}", capture.lexeme).expect("Writing to program output should always succeed.");
     }
 
-    let function = SiskinFunction { name: name.clone(), params: Vec::from(params), body: body.clone(), captured_vars };
+    let function = SiskinFunction {
+        name: name.clone(),
+        params: Vec::from(params),
+        body: body.clone(),
+        captured_vars,
+    };
     env.define(name.lexeme.clone(), SiskinValue::Function(function));
     Ok(())
 }
@@ -97,7 +110,7 @@ fn if_statement(
 
 fn print_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
     let result = evaluate(expression, env)?;
-    writeln!(env.output_writer, "{}", result.to_string())
+    writeln!(env.output_writer, "{}", result)
         .expect("Writing to program output should always succeed.");
     Ok(())
 }
@@ -143,7 +156,7 @@ fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
 fn evaluate_assign(name: &Token, value: &Expr, env: &mut Environment) -> ValueResult {
     let result = evaluate(value, env)?;
     env.assign(name.lexeme.clone(), result.clone())
-        .or_else(|e| Err(build_error(&e.to_string(), name.line)))?;
+        .map_err(|e| build_error(&e.to_string(), name.line))?;
     Ok(result)
 }
 
@@ -210,25 +223,25 @@ fn evaluate_call(
     let mut unwrapped_args = Vec::new();
     // WORK IN PROGRESS: if errors occurred during evaluation just return the first one
     for result in evaluated_args {
-        if let Ok(argument) = result {
-            unwrapped_args.push(argument);
-        } else {
-            return result;
-        }
+        unwrapped_args.push(result?);
     }
 
     let return_value = run_function(callee, unwrapped_args, paren.line, env)?;
-
-    return Ok(return_value);
+    Ok(return_value)
 }
 
-fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line: u32, env: &mut Environment) -> ValueResult {
+fn run_function(
+    function_handle: SiskinValue,
+    arguments: Vec<SiskinValue>,
+    line: u32,
+    env: &mut Environment,
+) -> ValueResult {
     match function_handle {
         SiskinValue::FunctionHandle(_) => {
             let function = env.get_function(&function_handle);
             env.push();
-            for i in 0..function.params.len() {
-                env.define(function.params[i].lexeme.clone(), arguments[i].clone());
+            for (i, item) in function.params.iter().enumerate() {
+                env.define(item.lexeme.clone(), arguments[i].clone());
             }
 
             // make captured variables available in current scope
@@ -237,14 +250,15 @@ fn run_function(function_handle: SiskinValue, arguments: Vec<SiskinValue>, line:
             }
 
             // TODO: return value plumbing in general, especially early returns!
-            let return_value = execute_statement(&function.body, env);
+            let _return_value = execute_statement(&function.body, env);
             // TODO: make sure pop happens even after errors
             env.pop();
             Ok(SiskinValue::from(LiteralValue::Nil))
         }
         _ => Err(Box::new(build_error(
             "Cannot call non-function expression.",
-            line)))
+            line,
+        ))),
     }
 }
 
@@ -308,7 +322,7 @@ fn evaluate_unary(operator: &Token, right: &Expr, env: &mut Environment) -> Valu
 
 fn evaluate_variable(name: &Token, env: &Environment) -> ValueResult {
     if let Some(value) = env.get(&name.lexeme) {
-        Ok(value.clone())
+        Ok(value)
     } else {
         Err(Box::new(build_error(
             &format!("Variable ({}) not found.", name.lexeme),
@@ -333,17 +347,17 @@ fn is_truthy(value: &SiskinValue) -> bool {
 }
 
 fn is_numeric_binary_operation(operator: &TokenType) -> bool {
-    match operator {
+    matches!(
+        operator,
         TokenType::Minus
-        | TokenType::Slash
-        | TokenType::Star
-        | TokenType::Plus
-        | TokenType::Greater
-        | TokenType::GreaterEqual
-        | TokenType::Less
-        | TokenType::LessEqual => true,
-        _ => false,
-    }
+            | TokenType::Slash
+            | TokenType::Star
+            | TokenType::Plus
+            | TokenType::Greater
+            | TokenType::GreaterEqual
+            | TokenType::Less
+            | TokenType::LessEqual
+    )
 }
 
 fn build_error(message: &str, line: u32) -> BasicError {

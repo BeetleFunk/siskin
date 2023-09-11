@@ -272,7 +272,7 @@ fn scan_number(cursor: &mut Cursor) -> TokenResult {
     match lexeme.parse() {
         Ok(number) => Ok(Token {
             token_type: TokenType::Number(number),
-            lexeme: lexeme,
+            lexeme,
             line: cursor.line,
         }),
         Err(e) => Err(Box::new(build_error(&e.to_string(), cursor.line))),

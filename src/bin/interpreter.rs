@@ -15,6 +15,7 @@ fn main() -> siskin::ExecutionResult {
     //     args.remove(0);
     // }
 
+    #[allow(clippy::comparison_chain)] 
     if args.len() > 1 {
         println!("Usage: siskin [script]");
         Err(Box::new(error::BasicError::new("Too many input arguments")))
@@ -46,7 +47,7 @@ fn run_prompt() -> siskin::ExecutionResult {
         if let Err(error) = result {
             println!("*** Encountered an error during execution ***");
             println!("{error}");
-            println!("");
+            println!();
         }
         buffer.clear();
     }

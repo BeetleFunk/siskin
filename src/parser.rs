@@ -318,7 +318,7 @@ fn binary_left_associative(
 }
 
 fn unary(cursor: &mut TokenCursor) -> ExprResult {
-    while let Some(operator) = cursor.advance_if_any_match(&[TokenType::Bang, TokenType::Minus]) {
+    if let Some(operator) = cursor.advance_if_any_match(&[TokenType::Bang, TokenType::Minus]) {
         let right = unary(cursor)?;
         return Ok(Expr::Unary {
             operator,
@@ -389,7 +389,7 @@ fn primary(cursor: &mut TokenCursor) -> ExprResult {
                 expression: Box::new(expr),
             })
         }
-        _ => return Err(Box::new(build_error("Expect expression.", current.line))),
+        _ => Err(Box::new(build_error("Expect expression.", current.line))),
     }
 }
 

@@ -88,8 +88,8 @@ fn if_statement_true() -> TestResult {
 #[test]
 fn if_statement_false() -> TestResult {
     let code = "\
-        var a = \"nope\";\n\
-        if (a == \"do it\") {\n\
+        var a = true;\n\
+        if (!a) {\n\
             print \"condition was true\";\n\
         }";
 
