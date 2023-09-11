@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
+use std::result;
 
 use crate::environment::Environment;
 use crate::environment::Reference;
 use crate::environment::SiskinFunction;
 use crate::environment::SiskinValue;
 use crate::error::BasicError;
-use crate::error::GenericResult;
 use crate::expr::Expr;
 use crate::expr::LiteralValue;
 use crate::resolver::resolve_function_captures;
@@ -13,17 +15,46 @@ use crate::scanner::Token;
 use crate::scanner::TokenType;
 use crate::stmt::Stmt;
 
-type UnitResult = GenericResult<()>;
-type ValueResult = GenericResult<SiskinValue>;
+type ValueResult = result::Result<SiskinValue, BasicError>;
+// Error result can be either an early return value or an interpreter error
+type StatementResult = result::Result<(), ReturnValueOrError>;
 
-pub fn execute(statements: &[Stmt], env: &mut Environment) -> UnitResult {
+#[derive(Debug)]
+pub struct ReturnValueOrError {
+    result: ValueResult,
+}
+
+impl ReturnValueOrError {
+    pub fn new(value: SiskinValue) -> ReturnValueOrError {
+        ReturnValueOrError { result: Ok(value) }
+    }
+}
+
+impl fmt::Display for ReturnValueOrError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.result {
+            Ok(value) => write!(f, "{}", value),
+            Err(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+impl From<BasicError> for ReturnValueOrError {
+    fn from(error: BasicError) -> Self {
+        ReturnValueOrError { result: Err(error) }
+    }
+}
+
+impl Error for ReturnValueOrError {}
+
+pub fn execute(statements: &[Stmt], env: &mut Environment) -> StatementResult {
     for statement in statements {
         execute_statement(statement, env)?;
     }
     Ok(())
 }
 
-fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
+fn execute_statement(statement: &Stmt, env: &mut Environment) -> StatementResult {
     match statement {
         Stmt::Block { statements } => block_statement(statements, env),
         Stmt::Expression { expression } => expression_statement(expression, env),
@@ -34,12 +65,13 @@ fn execute_statement(statement: &Stmt, env: &mut Environment) -> UnitResult {
             else_branch,
         } => if_statement(condition, then_branch, else_branch, env),
         Stmt::Print { expression } => print_statement(expression, env),
+        Stmt::Return { line, expression } => return_statement(line, expression, env),
         Stmt::Var { name, initializer } => var_statement(name, initializer, env),
         Stmt::While { condition, body } => while_statement(condition, body, env),
     }
 }
 
-fn block_statement(statements: &[Stmt], env: &mut Environment) -> UnitResult {
+fn block_statement(statements: &[Stmt], env: &mut Environment) -> StatementResult {
     env.push();
     for statement in statements {
         let result = execute_statement(statement, env);
@@ -54,7 +86,7 @@ fn block_statement(statements: &[Stmt], env: &mut Environment) -> UnitResult {
     Ok(())
 }
 
-fn expression_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
+fn expression_statement(expression: &Expr, env: &mut Environment) -> StatementResult {
     evaluate(expression, env)?;
     Ok(())
 }
@@ -64,14 +96,14 @@ fn function_statement(
     params: &[Token],
     body: &Stmt,
     env: &mut Environment,
-) -> UnitResult {
+) -> StatementResult {
     let captured_names = resolve_function_captures(params, body)?;
     let mut captured_vars: HashMap<String, Reference> = HashMap::new();
     for capture in captured_names {
         if let Some(reference) = env.get_reference(&capture.lexeme) {
             captured_vars.insert(capture.lexeme, reference);
-        } else {
-            return Err(Box::new(build_error(
+        } else if capture.lexeme != name.lexeme { // detect recursion, and avoid the error in that case
+            return Err(ReturnValueOrError::from(build_error(
                 &format!(
                     "Could not locate capture variable ({}) in function ({}).",
                     capture.lexeme, name.lexeme
@@ -98,7 +130,7 @@ fn if_statement(
     then_branch: &Stmt,
     else_branch: &Option<Box<Stmt>>,
     env: &mut Environment,
-) -> UnitResult {
+) -> StatementResult {
     if is_truthy(&evaluate(condition, env)?) {
         execute_statement(then_branch, env)
     } else if let Some(else_statement) = else_branch {
@@ -108,20 +140,26 @@ fn if_statement(
     }
 }
 
-fn print_statement(expression: &Expr, env: &mut Environment) -> UnitResult {
+fn print_statement(expression: &Expr, env: &mut Environment) -> StatementResult {
     let result = evaluate(expression, env)?;
     writeln!(env.output_writer, "{}", result)
         .expect("Writing to program output should always succeed.");
     Ok(())
 }
 
-fn var_statement(name: &Token, initializer: &Expr, env: &mut Environment) -> UnitResult {
+// Uses custom error type to pass early return values up the evaluation tree
+fn return_statement(_line: &u32, expression: &Expr, env: &mut Environment) -> StatementResult {
+    let return_value = evaluate(expression, env)?;
+    Err(ReturnValueOrError::new(return_value))
+}
+
+fn var_statement(name: &Token, initializer: &Expr, env: &mut Environment) -> StatementResult {
     let result = evaluate(initializer, env)?;
     env.define(name.lexeme.clone(), result);
     Ok(())
 }
 
-fn while_statement(condition: &Expr, body: &Stmt, env: &mut Environment) -> UnitResult {
+fn while_statement(condition: &Expr, body: &Stmt, env: &mut Environment) -> StatementResult {
     while is_truthy(&evaluate(condition, env)?) {
         execute_statement(body, env)?;
     }
@@ -249,16 +287,17 @@ fn run_function(
                 env.capture_reference(capture.0, capture.1);
             }
 
-            // TODO: return value plumbing in general, especially early returns!
-            let _return_value = execute_statement(&function.body, env);
-            // TODO: make sure pop happens even after errors
+            let return_value = execute_statement(&function.body, env);
             env.pop();
-            Ok(SiskinValue::from(LiteralValue::Nil))
+
+            if let Err(value_or_error) = return_value {
+                let value = value_or_error.result?;
+                Ok(value)
+            } else {
+                Ok(SiskinValue::from(LiteralValue::Nil))
+            }
         }
-        _ => Err(Box::new(build_error(
-            "Cannot call non-function expression.",
-            line,
-        ))),
+        _ => Err(build_error("Cannot call non-function expression.", line)),
     }
 }
 
@@ -288,10 +327,7 @@ fn evaluate_logical(
             return Ok(left_evaluated);
         }
     } else {
-        return Err(Box::new(build_error(
-            "Unhandled logical operator.",
-            operator.line,
-        )));
+        return Err(build_error("Unhandled logical operator.", operator.line));
     }
 
     let right_evaluated = evaluate(right, env)?;
@@ -324,10 +360,10 @@ fn evaluate_variable(name: &Token, env: &Environment) -> ValueResult {
     if let Some(value) = env.get(&name.lexeme) {
         Ok(value)
     } else {
-        Err(Box::new(build_error(
+        Err(build_error(
             &format!("Variable ({}) not found.", name.lexeme),
             name.line,
-        )))
+        ))
     }
 }
 

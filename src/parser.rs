@@ -29,16 +29,22 @@ fn declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn function(cursor: &mut TokenCursor) -> StmtResult {
-    cursor
-        .advance_if_match(&TokenType::Fun)
-        .ok_or_else(|| build_error("Function declaration with invalid token.", cursor.peek().line))?;
+    cursor.advance_if_match(&TokenType::Fun).ok_or_else(|| {
+        build_error(
+            "Function declaration with invalid token.",
+            cursor.peek().line,
+        )
+    })?;
 
     let name = if matches!(cursor.peek().token_type, TokenType::Identifier(_)) {
         let clone = cursor.peek().clone();
         cursor.advance();
         clone
     } else {
-        return Err(Box::new(build_error("Expect function name.", cursor.peek().line)));
+        return Err(Box::new(build_error(
+            "Expect function name.",
+            cursor.peek().line,
+        )));
     };
 
     // parse the parameter list
@@ -52,9 +58,12 @@ fn function(cursor: &mut TokenCursor) -> StmtResult {
                 params.push(cursor.peek().clone());
                 cursor.advance();
             } else {
-                return Err(Box::new(build_error("Expected identifiers only in parameter list.", cursor.peek().line)));
+                return Err(Box::new(build_error(
+                    "Expected identifiers only in parameter list.",
+                    cursor.peek().line,
+                )));
             }
-            
+
             // keep grabbing the next argument as long as the following token is a comma
             if cursor.advance_if_match(&TokenType::Comma).is_none() {
                 break;
@@ -75,9 +84,12 @@ fn function(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
-    cursor
-        .advance_if_match(&TokenType::Var)
-        .ok_or_else(|| build_error("Variable declaration with invalid token.", cursor.peek().line))?;
+    cursor.advance_if_match(&TokenType::Var).ok_or_else(|| {
+        build_error(
+            "Variable declaration with invalid token.",
+            cursor.peek().line,
+        )
+    })?;
 
     // TODO: this can be cleaner after literal restructuring
     let current = cursor.peek();
@@ -107,14 +119,25 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn statement(cursor: &mut TokenCursor) -> StmtResult {
-    if let Some(token) = cursor.advance_if_any_match(&[TokenType::For, TokenType::If, TokenType::Print, TokenType::While, TokenType::LeftBrace]) {
+    if let Some(token) = cursor.advance_if_any_match(&[
+        TokenType::For,
+        TokenType::If,
+        TokenType::Print,
+        TokenType::Return,
+        TokenType::While,
+        TokenType::LeftBrace,
+    ]) {
         match token.token_type {
             TokenType::For => for_statement(cursor),
             TokenType::If => if_statement(cursor),
             TokenType::Print => print_statement(cursor),
+            TokenType::Return => return_statement(cursor),
             TokenType::While => while_statement(cursor),
             TokenType::LeftBrace => block_statement(cursor),
-            _ => Err(Box::new(build_error("Unexpected token type when parsing statement.", token.line)))
+            _ => Err(Box::new(build_error(
+                "Unexpected token type when parsing statement.",
+                token.line,
+            ))),
         }
     } else {
         expression_statement(cursor)
@@ -127,13 +150,20 @@ fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
         .ok_or_else(|| build_error("Expect '(' after 'for''.", cursor.peek().line))?;
 
     let initializer = match cursor.peek().token_type {
-        TokenType::Semicolon => { cursor.advance(); Stmt::Block { statements: Vec::new() } }, // stand-in for empty statement
+        TokenType::Semicolon => {
+            cursor.advance();
+            Stmt::Block {
+                statements: Vec::new(),
+            }
+        } // stand-in for empty statement
         TokenType::Var => var_declaration(cursor)?,
         _ => expression_statement(cursor)?,
     };
 
     let condition = if cursor.peek().token_type == TokenType::Semicolon {
-        Expr::Literal { value: LiteralValue::Boolean(true) } // empty condition defaults to true (infinite looping)
+        Expr::Literal {
+            value: LiteralValue::Boolean(true),
+        } // empty condition defaults to true (infinite looping)
     } else {
         expression(cursor)?
     };
@@ -142,7 +172,9 @@ fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
         .ok_or_else(|| build_error("Expect ';' after loop condition.", cursor.peek().line))?;
 
     let increment = if cursor.peek().token_type == TokenType::RightParen {
-        Expr::Literal { value: LiteralValue::Nil } // stand-in for empty expr
+        Expr::Literal {
+            value: LiteralValue::Nil,
+        } // stand-in for empty expr
     } else {
         expression(cursor)?
     };
@@ -154,10 +186,22 @@ fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
 
     // transform for loop components into equivalent block statement containing initializer and while loop
 
-    let while_body = Stmt::Block { statements: vec![for_body, Stmt::Expression { expression: increment }] };
-    let while_loop = Stmt::While { condition, body: Box::new(while_body) };
+    let while_body = Stmt::Block {
+        statements: vec![
+            for_body,
+            Stmt::Expression {
+                expression: increment,
+            },
+        ],
+    };
+    let while_loop = Stmt::While {
+        condition,
+        body: Box::new(while_body),
+    };
 
-    Ok(Stmt::Block { statements: vec![initializer, while_loop] })
+    Ok(Stmt::Block {
+        statements: vec![initializer, while_loop],
+    })
 }
 
 fn if_statement(cursor: &mut TokenCursor) -> StmtResult {
@@ -176,7 +220,11 @@ fn if_statement(cursor: &mut TokenCursor) -> StmtResult {
         None
     };
 
-    Ok(Stmt::If { condition, then_branch, else_branch })
+    Ok(Stmt::If {
+        condition,
+        then_branch,
+        else_branch,
+    })
 }
 
 fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
@@ -185,6 +233,26 @@ fn print_statement(cursor: &mut TokenCursor) -> StmtResult {
         .advance_if_match(&TokenType::Semicolon)
         .ok_or_else(|| build_error("Expect ';' after print statement.", cursor.peek().line))?;
     Ok(Stmt::Print { expression })
+}
+
+fn return_statement(cursor: &mut TokenCursor) -> StmtResult {
+    if let Some(semicolon) = cursor.advance_if_match(&TokenType::Semicolon) {
+        Ok(Stmt::Return {
+            line: semicolon.line,
+            expression: Expr::Literal {
+                value: LiteralValue::Nil,
+            },
+        })
+    } else {
+        let expression = expression(cursor)?;
+        let semicolon = cursor
+            .advance_if_match(&TokenType::Semicolon)
+            .ok_or_else(|| build_error("Expect ';' after print statement.", cursor.peek().line))?;
+        Ok(Stmt::Return {
+            line: semicolon.line,
+            expression,
+        })
+    }
 }
 
 fn while_statement(cursor: &mut TokenCursor) -> StmtResult {
@@ -234,7 +302,12 @@ fn assignment(cursor: &mut TokenCursor) -> ExprResult {
                     value: Box::new(value),
                 }
             }
-            _ => return Err(Box::new(build_error("Invalid assignment target.", equal.line))),
+            _ => {
+                return Err(Box::new(build_error(
+                    "Invalid assignment target.",
+                    equal.line,
+                )))
+            }
         };
     }
 
@@ -252,7 +325,7 @@ fn and(cursor: &mut TokenCursor) -> ExprResult {
 fn logical_expression(
     cursor: &mut TokenCursor,
     higher_precedence: fn(&mut TokenCursor) -> ExprResult,
-    token_type: &TokenType
+    token_type: &TokenType,
 ) -> ExprResult {
     let mut expr = higher_precedence(cursor)?;
 
@@ -356,7 +429,11 @@ fn finish_call(cursor: &mut TokenCursor, callee: Expr) -> ExprResult {
         .advance_if_match(&TokenType::RightParen)
         .ok_or_else(|| build_error("Expect ')' after expression.", cursor.peek().line))?;
 
-    Ok(Expr::Call { callee: Box::new(callee), paren, arguments })
+    Ok(Expr::Call {
+        callee: Box::new(callee),
+        paren,
+        arguments,
+    })
 }
 
 fn primary(cursor: &mut TokenCursor) -> ExprResult {
@@ -384,7 +461,9 @@ fn primary(cursor: &mut TokenCursor) -> ExprResult {
             let expr = expression(cursor)?;
             cursor
                 .advance_if_match(&TokenType::RightParen)
-                .ok_or_else(|| build_error("Expect ')' after grouping expression.", cursor.peek().line))?;
+                .ok_or_else(|| {
+                    build_error("Expect ')' after grouping expression.", cursor.peek().line)
+                })?;
             Ok(Expr::Grouping {
                 expression: Box::new(expr),
             })

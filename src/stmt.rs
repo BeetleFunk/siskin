@@ -22,6 +22,10 @@ pub enum Stmt {
     Print {
         expression: Expr,
     },
+    Return {
+        line: u32,
+        expression: Expr,
+    },
     Var {
         name: Token,
         initializer: Expr,

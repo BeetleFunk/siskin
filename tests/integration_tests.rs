@@ -193,6 +193,40 @@ fn function_declaration() -> TestResult {
 }
 
 #[test]
+fn function_return() -> TestResult {
+    let code = "\
+        fun getNumber() {
+            return 82;
+            print \"Shouldn't reach this.\";
+        }
+        var result = getNumber();
+        print result;";
+
+    let output = run(code)?;
+    assert_eq!("82\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn recursion() -> TestResult {
+    let code = "\
+        fun fib(n) {
+            if (n <= 1) return n;
+            return fib(n - 2) + fib(n - 1);
+        }
+        
+        for (var i = 0; i < 20; i = i + 1) {
+            print fib(i);
+        }";
+
+    let output = run(code)?;
+    assert_eq!("0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n89\n144\n233\n377\n610\n987\n1597\n2584\n4181\n", output);
+
+    Ok(())
+}
+
+#[test]
 fn first_class_functions() -> TestResult {
     let code = "\
         fun say(n) {
