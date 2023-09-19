@@ -2,10 +2,11 @@ use std::collections::HashSet;
 use std::result;
 
 use crate::error::BasicError;
-use crate::expr::Expr;
-use crate::expr::LiteralValue;
 use crate::scanner::Token;
-use crate::stmt::Stmt;
+
+use super::expr::Expr;
+use super::expr::LiteralValue;
+use super::stmt::Stmt;
 
 type UnitResult = result::Result<(), BasicError>;
 
@@ -50,7 +51,10 @@ impl VarScopes {
     }
 }
 
-pub fn resolve_function_captures(params: &[Token], body: &Stmt) -> result::Result<Vec<Token>, BasicError> {
+pub fn resolve_function_captures(
+    params: &[Token],
+    body: &Stmt,
+) -> result::Result<Vec<Token>, BasicError> {
     let initial_definitions = HashSet::from_iter(params.iter().map(|token| token.lexeme.clone()));
     let mut scope_info = VarScopes::new(initial_definitions);
     resolve_statement(body, &mut scope_info)?;
@@ -68,7 +72,10 @@ fn resolve_statement(statement: &Stmt, scope: &mut VarScopes) -> UnitResult {
             else_branch,
         } => if_statement(condition, then_branch, else_branch, scope),
         Stmt::Print { expression } => print_statement(expression, scope),
-        Stmt::Return { line: _, expression } => return_statement(expression, scope),
+        Stmt::Return {
+            line: _,
+            expression,
+        } => return_statement(expression, scope),
         Stmt::Var { name, initializer } => var_statement(name, initializer, scope),
         Stmt::While { condition, body } => while_statement(condition, body, scope),
     }

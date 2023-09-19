@@ -3,17 +3,18 @@ use std::error::Error;
 use std::fmt;
 use std::result;
 
-use crate::environment::Environment;
-use crate::environment::Reference;
-use crate::environment::SiskinFunction;
-use crate::environment::SiskinValue;
 use crate::error::BasicError;
-use crate::expr::Expr;
-use crate::expr::LiteralValue;
-use crate::resolver::resolve_function_captures;
 use crate::scanner::Token;
 use crate::scanner::TokenType;
-use crate::stmt::Stmt;
+
+use super::environment::Environment;
+use super::environment::Reference;
+use super::environment::SiskinFunction;
+use super::environment::SiskinValue;
+use super::expr::Expr;
+use super::expr::LiteralValue;
+use super::resolver::resolve_function_captures;
+use super::stmt::Stmt;
 
 type ValueResult = result::Result<SiskinValue, BasicError>;
 // Error result can be either an early return value or an interpreter error
@@ -76,7 +77,7 @@ fn block_statement(statements: &[Stmt], env: &mut Environment) -> StatementResul
     for statement in statements {
         let result = execute_statement(statement, env);
 
-        // make sure to restore the stack even after an error. TODO: cleaner way to accomplish this?
+        // make sure to restore the stack even after an error.
         if result.is_err() {
             env.pop();
             return result;
@@ -102,7 +103,8 @@ fn function_statement(
     for capture in captured_names {
         if let Some(reference) = env.get_reference(&capture.lexeme) {
             captured_vars.insert(capture.lexeme, reference);
-        } else if capture.lexeme != name.lexeme { // detect recursion, and avoid the error in that case
+        } else if capture.lexeme != name.lexeme {
+            // detect recursion, and avoid the error in that case
             return Err(ReturnValueOrError::from(build_error(
                 &format!(
                     "Could not locate capture variable ({}) in function ({}).",

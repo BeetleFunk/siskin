@@ -1,12 +1,13 @@
 use siskin::error;
+use siskin::treewalk;
 
 type TestResult = error::GenericResult<()>;
 
 // run siskin code using a fresh interpreter environment and return a string containing the program output
 fn run(code: &str) -> error::GenericResult<String> {
     let mut buffer = Vec::new();
-    let mut env = siskin::Environment::new(&mut buffer);
-    siskin::execute(code, &mut env)?;
+    let mut env = treewalk::environment::Environment::new(&mut buffer);
+    treewalk::execute(code, &mut env)?;
 
     let output = std::str::from_utf8(&buffer.as_slice())?;
 

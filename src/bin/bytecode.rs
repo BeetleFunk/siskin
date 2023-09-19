@@ -1,5 +1,4 @@
 
-fn main() -> siskin::ExecutionResult {
+fn main() {
     println!("work in progress");
-    Ok(())
 }

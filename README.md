@@ -1,3 +1,5 @@
 # Siskin Interpreter
 
-See http://craftinginterpreters.com/
+Tree-walk and bytecode interpreters for the Siskin scripting language.
+
+Inspired by http://craftinginterpreters.com/
