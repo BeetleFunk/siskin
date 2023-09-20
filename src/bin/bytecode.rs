@@ -1,4 +1,5 @@
+use siskin::bytecode;
 
 fn main() {
-    println!("work in progress");
+    bytecode::execute();
 }
