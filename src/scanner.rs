@@ -1,16 +1,32 @@
 use crate::error::BasicError;
-use crate::error::GenericResult;
 
-type TokenResult = GenericResult<Token>;
+use std::result;
 
-pub fn scan_tokens(code: &str) -> GenericResult<Vec<Token>> {
+type TokenResult = result::Result<Token, BasicError>;
+
+// wrapper struct that manages the cursor and provides the next token on demand
+pub struct Scanner {
+    cursor: Cursor,
+}
+
+impl Scanner {
+    pub fn new(code: &str) -> Self {
+        let code_chars: Vec<char> = code.chars().collect();
+        Scanner { cursor: Cursor::new(code_chars) }
+    }
+
+    // TODO: returns EOF every time this is called upon reaching the end of the code, change to Option::None in order to force the caller to handle this?
+    pub fn next_token(&mut self) -> result::Result<Token, BasicError> {
+        next_token(&mut self.cursor)
+    }
+}
+
+pub fn scan_tokens(code: &str) -> result::Result<Vec<Token>, BasicError> {
     let mut tokens: Vec<Token> = Vec::new();
-
-    let code_chars: Vec<char> = code.chars().collect();
-    let mut cursor = Cursor::new(code_chars);
+    let mut scanner = Scanner::new(code);
 
     loop {
-        tokens.push(next_token(&mut cursor)?);
+        tokens.push(scanner.next_token()?);
         if tokens.last().unwrap().token_type == TokenType::Eof {
             break Ok(tokens);
         }
@@ -209,7 +225,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                             line: starting_line,
                         })
                     } else {
-                        Err(Box::new(build_error("Unterminated string.", cursor.line)))
+                        Err(build_error("Unterminated string.", cursor.line))
                     }
                 }
                 _ => {
@@ -218,7 +234,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                     } else if current.is_ascii_digit() {
                         scan_number(cursor)
                     } else {
-                        Err(Box::new(build_error(&format!("Unexpected character '{current}'."), cursor.line)))
+                        Err(build_error(&format!("Unexpected character '{current}'."), cursor.line))
                     }
                 }
             }
@@ -275,7 +291,7 @@ fn scan_number(cursor: &mut Cursor) -> TokenResult {
             lexeme,
             line: cursor.line,
         }),
-        Err(e) => Err(Box::new(build_error(&e.to_string(), cursor.line))),
+        Err(e) => Err(build_error(&e.to_string(), cursor.line)),
     }
 }
 

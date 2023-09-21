@@ -3,6 +3,7 @@ use std::result;
 use crate::error::BasicError;
 
 use super::code::{self, Chunk, OpCode, Value};
+use super::compiler;
 
 static DEBUG_TRACING: bool = true;
 
@@ -20,7 +21,12 @@ impl State {
     }
 }
 
-pub fn interpret(chunk: &Chunk) -> result::Result<(), BasicError>{
+pub fn interpret(source: &str) -> result::Result<(), BasicError> {
+    compiler::compile(source);
+    Ok(())
+}
+
+fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
     let mut state = State::new();
 
     while state.ip < chunk.code.len() {

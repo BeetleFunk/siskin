@@ -1,29 +1,30 @@
 use core::panic;
 use std::fmt;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
-    Return = 0,
-    Constant = 1,
-    Negate = 2,
-    Add = 3,
-    Subtract = 4,
-    Multiply = 5,
-    Divide = 6,
+    Return,
+    Constant,
+    Negate,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
 }
 
-// TODO: implement table lookup for performance
+const OP_TABLE: [OpCode; 7] = [
+    OpCode::Return,
+    OpCode::Constant,
+    OpCode::Negate,
+    OpCode::Add,
+    OpCode::Subtract,
+    OpCode::Multiply,
+    OpCode::Divide,
+];
+
 impl From<u8> for OpCode {
     fn from(val: u8) -> OpCode {
-        match val {
-            x if x == OpCode::Return as u8 => OpCode::Return,
-            x if x == OpCode::Constant as u8 => OpCode::Constant,
-            x if x == OpCode::Negate as u8 => OpCode::Negate,
-            x if x == OpCode::Add as u8 => OpCode::Add,
-            x if x == OpCode::Subtract as u8 => OpCode::Subtract,
-            x if x == OpCode::Multiply as u8 => OpCode::Multiply,
-            x if x == OpCode::Divide as u8 => OpCode::Divide,
-            _ => panic!("Invalid opcode {val}."),
-        }
+        OP_TABLE[val as usize]
     }
 }
 
