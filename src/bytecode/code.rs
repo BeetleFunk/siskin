@@ -4,6 +4,11 @@ use std::fmt;
 pub enum OpCode {
     Return = 0,
     Constant = 1,
+    Negate = 2,
+    Add = 3,
+    Subtract = 4,
+    Multiply = 5,
+    Divide = 6,
 }
 
 // TODO: implement table lookup for performance
@@ -12,13 +17,25 @@ impl From<u8> for OpCode {
         match val {
             x if x == OpCode::Return as u8 => OpCode::Return,
             x if x == OpCode::Constant as u8 => OpCode::Constant,
+            x if x == OpCode::Negate as u8 => OpCode::Negate,
+            x if x == OpCode::Add as u8 => OpCode::Add,
+            x if x == OpCode::Subtract as u8 => OpCode::Subtract,
+            x if x == OpCode::Multiply as u8 => OpCode::Multiply,
+            x if x == OpCode::Divide as u8 => OpCode::Divide,
             _ => panic!("Invalid opcode {val}."),
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
+}
+
+impl Value {
+    pub fn is_number(&self) -> bool {
+        matches!(self, Value::Number(_))
+    }
 }
 
 impl fmt::Display for Value {
@@ -33,10 +50,16 @@ impl fmt::Display for Value {
     }
 }
 
+impl From<f64> for Value {
+    fn from(number: f64) -> Value {
+        Value::Number(number)
+    }
+}
+
 pub struct Chunk {
-    code: Vec<u8>,
-    values: Vec<Value>,
-    line_numbers: Vec<u32>,
+    pub code: Vec<u8>,
+    pub values: Vec<Value>,
+    pub line_numbers: Vec<u32>,
 }
 
 impl Chunk {
@@ -76,7 +99,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     }
 }
 
-fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
+pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("{offset:04} ");
 
     if offset > 0 && chunk.line_numbers[offset] == chunk.line_numbers[offset - 1] {
@@ -89,6 +112,11 @@ fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     match opcode {
         OpCode::Return => simple_instruction("Return"),
         OpCode::Constant => constant_instruction(chunk, offset),
+        OpCode::Negate => simple_instruction("Negate"),
+        OpCode::Add => simple_instruction("Add"),
+        OpCode::Subtract => simple_instruction("Subtract"),
+        OpCode::Multiply => simple_instruction("Multiply"),
+        OpCode::Divide => simple_instruction("Divide"),
     }
 }
 
