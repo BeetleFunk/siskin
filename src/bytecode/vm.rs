@@ -22,8 +22,8 @@ impl State {
 }
 
 pub fn interpret(source: &str) -> result::Result<(), BasicError> {
-    compiler::compile(source);
-    Ok(())
+    let chunk = compiler::compile(source)?;
+    execute(&chunk)
 }
 
 fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
