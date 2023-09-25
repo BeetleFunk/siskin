@@ -37,16 +37,9 @@ fn function(cursor: &mut TokenCursor) -> StmtResult {
         )
     })?;
 
-    let name = if matches!(cursor.peek().token_type, TokenType::Identifier(_)) {
-        let clone = cursor.peek().clone();
-        cursor.advance();
-        clone
-    } else {
-        return Err(Box::new(build_error(
-            "Expect function name.",
-            cursor.peek().line,
-        )));
-    };
+    let name = cursor
+        .advance_if_match(&TokenType::Identifier)
+        .ok_or_else(|| build_error("Expect function name.", cursor.peek().line))?;
 
     // parse the parameter list
     let mut params = Vec::new();
@@ -55,15 +48,15 @@ fn function(cursor: &mut TokenCursor) -> StmtResult {
         .ok_or_else(|| build_error("Expect '(' after function name.", cursor.peek().line))?;
     if cursor.peek().token_type != TokenType::RightParen {
         loop {
-            if matches!(cursor.peek().token_type, TokenType::Identifier(_)) {
-                params.push(cursor.peek().clone());
-                cursor.advance();
-            } else {
-                return Err(Box::new(build_error(
-                    "Expected identifiers only in parameter list.",
-                    cursor.peek().line,
-                )));
-            }
+            let param = cursor
+                .advance_if_match(&TokenType::Identifier)
+                .ok_or_else(|| {
+                    build_error(
+                        "Expected identifiers only in parameter list.",
+                        cursor.peek().line,
+                    )
+                })?;
+            params.push(param);
 
             // keep grabbing the next argument as long as the following token is a comma
             if cursor.advance_if_match(&TokenType::Comma).is_none() {
@@ -92,16 +85,9 @@ fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
         )
     })?;
 
-    // TODO: this can be cleaner after literal restructuring
-    let current = cursor.peek();
-    let name = match current.token_type {
-        TokenType::Identifier(_) => {
-            let clone = current.clone();
-            cursor.advance();
-            clone
-        }
-        _ => return Err(Box::new(build_error("Expect variable name.", current.line))),
-    };
+    let name = cursor
+        .advance_if_match(&TokenType::Identifier)
+        .ok_or_else(|| build_error("Expect variable name.", cursor.peek().line))?;
 
     let initializer = if cursor.advance_if_match(&TokenType::Equal).is_some() {
         expression(cursor)?
@@ -444,15 +430,15 @@ fn primary(cursor: &mut TokenCursor) -> ExprResult {
         TokenType::False
         | TokenType::True
         | TokenType::Nil
-        | TokenType::Number(_)
-        | TokenType::String(_) => {
+        | TokenType::Number
+        | TokenType::String => {
             let literal = Expr::Literal {
                 value: LiteralValue::from(current),
             };
             cursor.advance();
             Ok(literal)
         }
-        TokenType::Identifier(_) => {
+        TokenType::Identifier => {
             let name = current.clone();
             cursor.advance();
             Ok(Expr::Variable { name })
@@ -510,7 +496,6 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
-    // TODO: TokenType also wraps literal values which could affect equality comparisons in here, don't use this for literal type tokens right now
     fn advance_if_any_match(&mut self, types: &[TokenType]) -> Option<Token> {
         let token = self.peek();
         if types.contains(&token.token_type) {

@@ -49,12 +49,16 @@ pub enum LiteralValue {
 
 impl fmt::Display for LiteralValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            Self::Boolean(value) => value.to_string(),
-            Self::Nil => "nil".to_string(),
-            Self::Number(value) => value.to_string(),
-            Self::String(value) => value.to_string(),
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Boolean(value) => value.to_string(),
+                Self::Nil => "nil".to_string(),
+                Self::Number(value) => value.to_string(),
+                Self::String(value) => value.to_string(),
+            }
+        )
     }
 }
 
@@ -65,9 +69,9 @@ impl From<&Token> for LiteralValue {
             TokenType::False => LiteralValue::Boolean(false),
             TokenType::True => LiteralValue::Boolean(true),
             TokenType::Nil => LiteralValue::Nil,
-            TokenType::Number(value) => LiteralValue::Number(*value),
-            TokenType::String(value) => LiteralValue::String(value.clone()),
-            _ => panic!("Cannot make literal value from non-literal token")
+            TokenType::Number => LiteralValue::Number(token.extract_number()),
+            TokenType::String => LiteralValue::String(token.extract_string().clone()),
+            _ => panic!("Cannot make literal value from non-literal token"),
         }
     }
 }

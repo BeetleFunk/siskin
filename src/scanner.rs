@@ -12,7 +12,9 @@ pub struct Scanner {
 impl Scanner {
     pub fn new(code: &str) -> Self {
         let code_chars: Vec<char> = code.chars().collect();
-        Scanner { cursor: Cursor::new(code_chars) }
+        Scanner {
+            cursor: Cursor::new(code_chars),
+        }
     }
 
     // TODO: returns EOF every time this is called upon reaching the end of the code, change to Option::None in order to force the caller to handle this?
@@ -38,6 +40,68 @@ pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub line: u32,
+    pub token_value: Option<TokenValue>,
+}
+
+impl Token {
+    fn new(token_type: TokenType, lexeme: String, line: u32) -> Self {
+        Token {
+            token_type,
+            lexeme,
+            line,
+            token_value: None,
+        }
+    }
+
+    fn with_value(
+        token_type: TokenType,
+        lexeme: String,
+        line: u32,
+        token_value: TokenValue,
+    ) -> Self {
+        Token {
+            token_type,
+            lexeme,
+            line,
+            token_value: Some(token_value),
+        }
+    }
+
+    pub fn extract_number(&self) -> f64 {
+        if matches!(self.token_type, TokenType::Number) {
+            if let Some(TokenValue::Number(value)) = self.token_value {
+                value
+            } else {
+                panic!("Number token did not have a numeric value");
+            }
+        } else {
+            panic!("Called extract_number on non-number token");
+        }
+    }
+
+    pub fn extract_string(&self) -> &String {
+        if matches!(self.token_type, TokenType::String) {
+            if let Some(TokenValue::String(value)) = self.token_value.as_ref() {
+                value
+            } else {
+                panic!("String token did not have a string value");
+            }
+        } else {
+            panic!("Called extract_string on non-string token");
+        }
+    }
+
+    pub fn extract_name(&self) -> &String {
+        if matches!(self.token_type, TokenType::Identifier) {
+            if let Some(TokenValue::Name(value)) = self.token_value.as_ref() {
+                value
+            } else {
+                panic!("Identifier token did not have a string value");
+            }
+        } else {
+            panic!("Called extract_name on non-identifier token");
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,9 +130,9 @@ pub enum TokenType {
     LessEqual,
 
     // Literals.
-    Identifier(String),
-    String(String),
-    Number(f64),
+    Identifier,
+    String,
+    Number,
 
     // Keywords.
     And,
@@ -90,6 +154,13 @@ pub enum TokenType {
 
     // End-Of-File
     Eof,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenValue {
+    Name(String),
+    Number(f64),
+    String(String),
 }
 
 #[derive(Debug)]
@@ -215,14 +286,21 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                     if cursor.buffer_next_if_match('"') {
                         // increment line count for any newline characters within the string but keep track of original line number
                         let starting_line = cursor.line;
-                        cursor.line += cursor.chars_at_cursor().iter().filter(|&c| *c == '\n').count() as u32;
+                        cursor.line += cursor
+                            .chars_at_cursor()
+                            .iter()
+                            .filter(|&c| *c == '\n')
+                            .count() as u32;
 
                         let quoted = cursor.string_at_cursor();
                         Ok(Token {
                             // lexeme bounded by quote chars so this slice should never panic
-                            token_type: TokenType::String(quoted[1..(quoted.len() - 1)].to_string()),
-                            lexeme: quoted,
+                            token_type: TokenType::String,
+                            lexeme: quoted.clone(),
                             line: starting_line,
+                            token_value: Some(TokenValue::String(
+                                quoted[1..(quoted.len() - 1)].to_string(),
+                            )),
                         })
                     } else {
                         Err(build_error("Unterminated string.", cursor.line))
@@ -234,43 +312,42 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                     } else if current.is_ascii_digit() {
                         scan_number(cursor)
                     } else {
-                        Err(build_error(&format!("Unexpected character '{current}'."), cursor.line))
+                        Err(build_error(
+                            &format!("Unexpected character '{current}'."),
+                            cursor.line,
+                        ))
                     }
                 }
             }
         }
     } else {
-        Ok(Token {
-            token_type: TokenType::Eof,
-            lexeme: String::from(""),
-            line: cursor.line,
-        })
+        Ok(Token::new(TokenType::Eof, String::from(""), cursor.line))
     }
 }
 
+// creates a token without any TokenValue at the current cursor range
 fn token_at_cursor(cursor: &Cursor, token_type: TokenType) -> TokenResult {
-    Ok(Token {
+    Ok(Token::new(
         token_type,
-        lexeme: cursor.string_at_cursor(),
-        line: cursor.line,
-    })
+        cursor.string_at_cursor(),
+        cursor.line,
+    ))
 }
 
 fn scan_identifier(cursor: &mut Cursor) -> TokenResult {
     cursor.buffer_next_until(|next| !next.is_alphanumeric());
     let lexeme = cursor.string_at_cursor();
 
-    let token_type = if let Some(keyword) = to_keyword(&lexeme) {
-        keyword
+    if let Some(keyword) = to_keyword(&lexeme) {
+        Ok(Token::new(keyword, lexeme, cursor.line))
     } else {
-        TokenType::Identifier(lexeme.clone())
-    };
-
-    Ok(Token {
-        token_type,
-        lexeme,
-        line: cursor.line,
-    })
+        Ok(Token::with_value(
+            TokenType::Identifier,
+            lexeme.clone(),
+            cursor.line,
+            TokenValue::Name(lexeme),
+        ))
+    }
 }
 
 fn scan_number(cursor: &mut Cursor) -> TokenResult {
@@ -286,11 +363,12 @@ fn scan_number(cursor: &mut Cursor) -> TokenResult {
     let lexeme = cursor.string_at_cursor();
 
     match lexeme.parse() {
-        Ok(number) => Ok(Token {
-            token_type: TokenType::Number(number),
+        Ok(number) => Ok(Token::with_value(
+            TokenType::Number,
             lexeme,
-            line: cursor.line,
-        }),
+            cursor.line,
+            TokenValue::Number(number),
+        )),
         Err(e) => Err(build_error(&e.to_string(), cursor.line)),
     }
 }
