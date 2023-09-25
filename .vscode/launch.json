@@ -7,15 +7,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'siskin'",
+            "name": "Debug executable 'bytecode'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=siskin",
+                    "--bin=bytecode",
                     "--package=siskin"
                 ],
                 "filter": {
-                    "name": "siskin",
+                    "name": "bytecode",
                     "kind": "bin"
                 }
             },

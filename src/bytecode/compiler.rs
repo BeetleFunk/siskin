@@ -11,7 +11,7 @@ type UnitResult = result::Result<(), BasicError>;
 struct Parser {
     scanner: Scanner,
     current: Token,
-    previous: Option<Token>,
+    previous: Token,
 }
 
 impl Parser {
@@ -21,13 +21,19 @@ impl Parser {
         Ok(Parser {
             scanner,
             current,
-            previous: None,
+            previous: Token {
+                // this initial dummy token should never actually be read with look-ahead parsing
+                token_type: TokenType::Eof,
+                lexeme: "".to_string(),
+                line: 0,
+                token_value: None,
+            },
         })
     }
 
     fn advance(&mut self) -> result::Result<&Token, BasicError> {
         let replaced = mem::replace(&mut self.current, self.scanner.next_token()?);
-        self.previous = Some(replaced);
+        self.previous = replaced;
         Ok(&self.current)
     }
 }
@@ -98,23 +104,19 @@ fn get_rule(token_type: TokenType) -> &'static ParseRule {
 }
 
 pub fn compile(source: &str) -> result::Result<Chunk, BasicError> {
-    let mut scanner = Scanner::new(source);
-    let mut parser = Parser::new(scanner)?;
+    let scanner = Scanner::new(source);
+    let parser = Parser::new(scanner)?;
 
-    let mut chunk = Chunk::new();
+    let chunk = Chunk::new();
 
     // TBD: Should compiler own these or not?
     let mut compiler = Compiler { parser, chunk };
 
-    let func = PARSE_TABLE[0].1.prefix.unwrap();
-    func(&mut compiler);
-    loop {
-        // This should always be the last token?
-        if compiler.parser.current.token_type == TokenType::Eof {
-            break;
-        } else {
-            panic!("Expect EOF token type as the final scanner token.")
-        }
+    expression(&mut compiler)?;
+
+    // This should always be the last token?
+    if compiler.parser.current.token_type != TokenType::Eof {
+        panic!("Expect EOF token type as the final scanner token.")
     }
 
     compiler.emit_byte(OpCode::Return);
@@ -133,39 +135,46 @@ impl Compiler {
     }
 
     fn emit_byte(&mut self, byte: OpCode) {
-        self.chunk
-            .write_op(byte, self.parser.previous.as_ref().unwrap().line);
+        self.chunk.write_op(byte, self.parser.previous.line);
     }
 
     fn emit_bytes(&mut self, byte1: OpCode, byte2: u8) {
-        self.chunk
-            .write_op(byte1, self.parser.previous.as_ref().unwrap().line);
-        self.chunk
-            .write(byte2, self.parser.previous.as_ref().unwrap().line);
+        self.chunk.write_op(byte1, self.parser.previous.line);
+        self.chunk.write(byte2, self.parser.previous.line);
     }
 
-    fn consume(
-        &mut self,
-        expected: TokenType,
-        error_msg: &str,
-    ) -> result::Result<&Token, BasicError> {
-        let token = self.parser.advance()?;
-        if token.token_type == expected {
-            Ok(token)
+    fn consume(&mut self, expected: TokenType, error_msg: &str) -> UnitResult {
+        if self.parser.current.token_type == expected {
+            self.parser.advance()?;
+            Ok(())
         } else {
-            Err(build_error(error_msg, token.line))
+            Err(build_error(error_msg, self.parser.current.line))
         }
     }
 }
 
-fn expression(compiler: &mut Compiler) {
+fn expression(compiler: &mut Compiler) -> UnitResult {
     parse_precedence(compiler, PREC_ASSIGNMENT)
 }
 
-fn parse_precedence(compiler: &mut Compiler, precedence: u32) {}
+fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
+    compiler.parser.advance()?;
+    let prefix_rule = get_rule(compiler.parser.previous.token_type).prefix;
+    let prefix_rule = prefix_rule
+        .ok_or_else(|| build_error("Expect expression.", compiler.parser.previous.line))?;
+    prefix_rule(compiler)?;
+
+    while precedence <= get_rule(compiler.parser.current.token_type).precedence {
+        compiler.parser.advance()?;
+        let infix_rule = get_rule(compiler.parser.previous.token_type).infix.unwrap();
+        infix_rule(compiler)?;
+    }
+
+    Ok(())
+}
 
 fn number(compiler: &mut Compiler) -> UnitResult {
-    let token = compiler.parser.previous.as_ref().unwrap();
+    let token = &compiler.parser.previous;
     if token.token_type == TokenType::Number {
         let address = compiler.chunk.add_constant(token.extract_number().into());
         compiler.emit_bytes(OpCode::Constant, address);
@@ -176,21 +185,15 @@ fn number(compiler: &mut Compiler) -> UnitResult {
 }
 
 fn grouping(compiler: &mut Compiler) -> UnitResult {
-    expression(compiler);
+    expression(compiler)?;
     compiler.consume(TokenType::RightParen, "Expect ')' after expression.")?;
     Ok(())
 }
 
 fn unary(compiler: &mut Compiler) -> UnitResult {
-    let token_type = compiler
-        .parser
-        .previous
-        .as_ref()
-        .unwrap()
-        .token_type
-        .clone();
+    let token_type = compiler.parser.previous.token_type.clone();
     // compile operand
-    parse_precedence(compiler, PREC_UNARY);
+    parse_precedence(compiler, PREC_UNARY)?;
     match token_type {
         TokenType::Minus => compiler.emit_byte(OpCode::Negate),
         _ => panic!("Unhandled unary token: {:?}", token_type),
@@ -199,9 +202,9 @@ fn unary(compiler: &mut Compiler) -> UnitResult {
 }
 
 fn binary(compiler: &mut Compiler) -> UnitResult {
-    let token_type = compiler.parser.previous.as_ref().unwrap().token_type;
+    let token_type = compiler.parser.previous.token_type;
     let rule = get_rule(token_type);
-    parse_precedence(compiler, rule.precedence + 1);
+    parse_precedence(compiler, rule.precedence + 1)?;
     match token_type {
         TokenType::Plus => compiler.emit_byte(OpCode::Add),
         TokenType::Minus => compiler.emit_byte(OpCode::Subtract),
