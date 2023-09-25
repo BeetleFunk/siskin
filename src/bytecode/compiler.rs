@@ -48,7 +48,7 @@ struct ParseRule {
     precedence: u32,
 }
 
-const PARSE_TABLE: [(TokenType, ParseRule); 1] = [(TokenType::Number(0.0), ParseRule { prefix: Some(number), infix: None, precedence: PREC_NONE })];
+const PARSE_TABLE: [(TokenType, ParseRule); 1] = [(TokenType::Number, ParseRule { prefix: Some(number), infix: None, precedence: PREC_NONE })];
 
 pub fn compile(source: &str) -> result::Result<Chunk, BasicError> {
     let mut scanner = Scanner::new(source);
@@ -96,8 +96,8 @@ impl Compiler {
 
 fn number(compiler: &mut Compiler) {
     let token = compiler.parser.previous.as_ref().unwrap();
-    if let TokenType::Number(value) = token.token_type {
-        let address = compiler.chunk.add_constant(value.into());
+    if token.token_type == TokenType::Number {
+        let address = compiler.chunk.add_constant(token.extract_number().into());
         compiler.emit_bytes(OpCode::Constant, address);
     } else {
         panic!("Token at location is not a number.");
