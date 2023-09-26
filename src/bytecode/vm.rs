@@ -48,11 +48,41 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 state.stack.push(value);
             }
             OpCode::Negate => {
-                if state.stack.last().unwrap().is_number() {
-                    let original = extract_number(state.stack.pop().unwrap());
-                    state.stack.push(Value::from(-original));
+                if let Value::Number(value) = state.stack.pop().unwrap() {
+                    state.stack.push(Value::from(-value));
                 } else {
-                    return Err(build_error("Negation requires numeric argument", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Negation requires numeric operand", chunk.line_numbers[state.ip - 1]));
+                }
+            }
+            OpCode::Not => {
+                if let Value::Bool(value) = state.stack.pop().unwrap() {
+                    state.stack.push(Value::from(!value));
+                } else {
+                    return Err(build_error("Boolean inversion requires boolean operand", chunk.line_numbers[state.ip - 1]));
+                }
+            }
+            OpCode::Equal => {
+                let b = state.stack.pop().unwrap();
+                let a = state.stack.pop().unwrap();
+                state.stack.push(Value::from(a == b));
+            }
+            OpCode::Greater => {
+                // TODO: move this pattern for binary numeric operands into a separate function, still needs easier error reporting hook!
+                let b = state.stack.pop().unwrap();
+                let a = state.stack.pop().unwrap();
+                if a.is_number() && b.is_number() {
+                    state.stack.push(Value::from(extract_number(a) > extract_number(b)));
+                } else {
+                    return Err(build_error("Comparison requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                }
+            }
+            OpCode::Less => {
+                let b = state.stack.pop().unwrap();
+                let a = state.stack.pop().unwrap();
+                if a.is_number() && b.is_number() {
+                    state.stack.push(Value::from(extract_number(a) < extract_number(b)));
+                } else {
+                    return Err(build_error("Addition requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Add => {
@@ -61,7 +91,7 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if a.is_number() && b.is_number() {
                     state.stack.push(Value::from(extract_number(a) + extract_number(b)));
                 } else {
-                    return Err(build_error("Addition expects numeric arguments", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Addition requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Subtract => {
@@ -70,7 +100,7 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if a.is_number() && b.is_number() {
                     state.stack.push(Value::from(extract_number(a) - extract_number(b)));
                 } else {
-                    return Err(build_error("Subtraction expects numeric arguments", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Subtraction requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Multiply => {
@@ -79,7 +109,7 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if a.is_number() && b.is_number() {
                     state.stack.push(Value::from(extract_number(a) * extract_number(b)));
                 } else {
-                    return Err(build_error("Multiplication expects numeric arguments", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Multiplication requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Divide => {
@@ -88,9 +118,12 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if a.is_number() && b.is_number() {
                     state.stack.push(Value::from(extract_number(a) / extract_number(b)));
                 } else {
-                    return Err(build_error("Division expects numeric arguments", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Division requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
+            OpCode::Nil => state.stack.push(Value::Nil),
+            OpCode::True => state.stack.push(Value::Bool(true)),
+            OpCode::False => state.stack.push(Value::Bool(false)),
         }
     }
 

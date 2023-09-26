@@ -6,20 +6,34 @@ pub enum OpCode {
     Return,
     Constant,
     Negate,
+    Not,
+    Equal,
+    Greater,
+    Less,
     Add,
     Subtract,
     Multiply,
     Divide,
+    Nil,
+    True,
+    False,
 }
 
-const OP_TABLE: [OpCode; 7] = [
+const OP_TABLE: [OpCode; 14] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
+    OpCode::Not,
+    OpCode::Equal,
+    OpCode::Greater,
+    OpCode::Less,
     OpCode::Add,
     OpCode::Subtract,
     OpCode::Multiply,
     OpCode::Divide,
+    OpCode::Nil,
+    OpCode::True,
+    OpCode::False,
 ];
 
 impl From<u8> for OpCode {
@@ -30,6 +44,8 @@ impl From<u8> for OpCode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    Bool(bool),
+    Nil,
     Number(f64),
 }
 
@@ -45,9 +61,17 @@ impl fmt::Display for Value {
             f,
             "{}",
             match self {
+                Self::Bool(value) => value.to_string(),
+                Self::Nil => "Nil".to_string(),
                 Self::Number(value) => value.to_string(),
             }
         )
+    }
+}
+
+impl From<bool> for Value {
+    fn from(boolean: bool) -> Value {
+        Value::Bool(boolean)
     }
 }
 
@@ -114,10 +138,17 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Return => simple_instruction("Return"),
         OpCode::Constant => constant_instruction(chunk, offset),
         OpCode::Negate => simple_instruction("Negate"),
+        OpCode::Not => simple_instruction("Not"),
+        OpCode::Equal => simple_instruction("Equal"),
+        OpCode::Greater => simple_instruction("Greater"),
+        OpCode::Less => simple_instruction("Less"),
         OpCode::Add => simple_instruction("Add"),
         OpCode::Subtract => simple_instruction("Subtract"),
         OpCode::Multiply => simple_instruction("Multiply"),
         OpCode::Divide => simple_instruction("Divide"),
+        OpCode::Nil => simple_instruction("Nil"),
+        OpCode::True => simple_instruction("True"),
+        OpCode::False => simple_instruction("False"),
     }
 }
 

@@ -38,7 +38,7 @@ fn run_prompt() -> ExecutionResult {
     let mut buffer = String::new();
     let stdin = io::stdin();
 
-    let mut output_writer = io::stdout().lock();
+    //let mut output_writer = io::stdout().lock();
 
     loop {
         stdin.read_line(&mut buffer)?;
