@@ -81,7 +81,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::Less,           ParseRule { prefix: None,           infix: Some(binary),    precedence: PREC_COMPARISON }),
     (TokenType::LessEqual,      ParseRule { prefix: None,           infix: Some(binary),    precedence: PREC_COMPARISON }),
     (TokenType::Identifier,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
-    (TokenType::String,         ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::String,         ParseRule { prefix: Some(string),   infix: None,            precedence: PREC_NONE }),
     (TokenType::Number,         ParseRule { prefix: Some(number),   infix: None,            precedence: PREC_NONE }),
     (TokenType::And,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Class,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -181,6 +181,17 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
         infix_rule(compiler)?;
     }
 
+    Ok(())
+}
+
+fn string(compiler: &mut Compiler) -> UnitResult {
+    let token = &compiler.parser.previous;
+    if token.token_type == TokenType::String {
+        let address = compiler.chunk.add_constant(token.extract_string().to_owned().into());
+        compiler.emit_data_op(OpCode::Constant, address);
+    } else {
+        panic!("Token at line {} is not a number.", token.line);
+    }
     Ok(())
 }
 

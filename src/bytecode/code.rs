@@ -47,12 +47,7 @@ pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
-}
-
-impl Value {
-    pub fn is_number(&self) -> bool {
-        matches!(self, Value::Number(_))
-    }
+    String(String)
 }
 
 impl fmt::Display for Value {
@@ -64,6 +59,7 @@ impl fmt::Display for Value {
                 Self::Bool(value) => value.to_string(),
                 Self::Nil => "Nil".to_string(),
                 Self::Number(value) => value.to_string(),
+                Self::String(value) => value.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
             }
         )
     }
@@ -78,6 +74,12 @@ impl From<bool> for Value {
 impl From<f64> for Value {
     fn from(number: f64) -> Value {
         Value::Number(number)
+    }
+}
+
+impl From<String> for Value {
+    fn from(string: String) -> Value {
+        Value::String(string)
     }
 }
 

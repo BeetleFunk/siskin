@@ -67,56 +67,51 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 state.stack.push(Value::from(a == b));
             }
             OpCode::Greater => {
-                // TODO: move this pattern for binary numeric operands into a separate function, still needs easier error reporting hook!
-                let b = state.stack.pop().unwrap();
-                let a = state.stack.pop().unwrap();
-                if a.is_number() && b.is_number() {
-                    state.stack.push(Value::from(extract_number(a) > extract_number(b)));
+                let operands = pop_binary_operands(&mut state.stack);
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.stack.push(Value::from(a > b));
                 } else {
                     return Err(build_error("Comparison requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Less => {
-                let b = state.stack.pop().unwrap();
-                let a = state.stack.pop().unwrap();
-                if a.is_number() && b.is_number() {
-                    state.stack.push(Value::from(extract_number(a) < extract_number(b)));
+                let operands = pop_binary_operands(&mut state.stack);
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.stack.push(Value::from(a < b));
                 } else {
-                    return Err(build_error("Addition requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Comparison requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Add => {
-                let b = state.stack.pop().unwrap();
-                let a = state.stack.pop().unwrap();
-                if a.is_number() && b.is_number() {
-                    state.stack.push(Value::from(extract_number(a) + extract_number(b)));
+                let operands = pop_binary_operands(&mut state.stack);
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.stack.push(Value::from(a + b));
+                } else if let (Value::String(a), Value::String(b)) = operands {
+                    state.stack.push(Value::from(a + &b));
                 } else {
-                    return Err(build_error("Addition requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error("Addition requires either numeric or string operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Subtract => {
-                let b = state.stack.pop().unwrap();
-                let a = state.stack.pop().unwrap();
-                if a.is_number() && b.is_number() {
-                    state.stack.push(Value::from(extract_number(a) - extract_number(b)));
+                let operands = pop_binary_operands(&mut state.stack);
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.stack.push(Value::from(a - b));
                 } else {
                     return Err(build_error("Subtraction requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Multiply => {
-                let b = state.stack.pop().unwrap();
-                let a = state.stack.pop().unwrap();
-                if a.is_number() && b.is_number() {
-                    state.stack.push(Value::from(extract_number(a) * extract_number(b)));
+                let operands = pop_binary_operands(&mut state.stack);
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.stack.push(Value::from(a * b));
                 } else {
                     return Err(build_error("Multiplication requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
             }
             OpCode::Divide => {
-                let b = state.stack.pop().unwrap();
-                let a = state.stack.pop().unwrap();
-                if a.is_number() && b.is_number() {
-                    state.stack.push(Value::from(extract_number(a) / extract_number(b)));
+                let operands = pop_binary_operands(&mut state.stack);
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.stack.push(Value::from(a / b));
                 } else {
                     return Err(build_error("Division requires numeric operands", chunk.line_numbers[state.ip - 1]));
                 }
@@ -142,11 +137,10 @@ fn read_constant(state: &mut State, chunk: &Chunk) -> Value {
     value.clone()
 }
 
-fn extract_number(value: Value) -> f64 {
-    match value {
-        Value::Number(result) => result,
-        _ => panic!("Expected number value, received ({value}) instead.")
-    }
+fn pop_binary_operands(stack: &mut Vec<Value>) -> (Value, Value) {
+    let b = stack.pop().unwrap();
+    let a = stack.pop().unwrap();
+    (a, b)
 }
 
 fn print_stack(stack: &Vec<Value>) {
