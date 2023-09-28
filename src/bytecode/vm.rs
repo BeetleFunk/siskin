@@ -157,13 +157,29 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                     panic!("DefineGlobal must have a string constant for the variable name.");
                 }
             }
-            OpCode::LoadGlobal => {
+            OpCode::GetGlobal => {
                 if let Value::String(name) = read_constant(&mut state, chunk) {
                     if let Some(value) = state.globals.get(&name) {
                         state.stack.push(value.clone());
                     } else {
                         return Err(build_error(
                             &format!("Undefined variable {name}."),
+                            chunk.line_numbers[state.ip - 1],
+                        ));
+                    }
+                } else {
+                    panic!("LoadGlobal must have a string constant for the variable name.");
+                }
+            }
+            OpCode::SetGlobal => {
+                if let Value::String(name) = read_constant(&mut state, chunk) {
+                    let entry = state.globals.entry(name);
+                    if let std::collections::hash_map::Entry::Occupied(mut entry) = entry {
+                        // avoid popping the value off the stack here, assignment result should be propagated
+                        entry.insert(state.stack.last().unwrap().clone());
+                    } else {
+                        return Err(build_error(
+                            &format!("Undefined variable {}.", entry.key()),
                             chunk.line_numbers[state.ip - 1],
                         ));
                     }

@@ -20,10 +20,11 @@ pub enum OpCode {
     Print,
     Pop,
     DefineGlobal,
-    LoadGlobal,
+    GetGlobal,
+    SetGlobal,
 }
 
-const OP_TABLE: [OpCode; 18] = [
+const OP_TABLE: [OpCode; 19] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -41,7 +42,8 @@ const OP_TABLE: [OpCode; 18] = [
     OpCode::Print,
     OpCode::Pop,
     OpCode::DefineGlobal,
-    OpCode::LoadGlobal,
+    OpCode::GetGlobal,
+    OpCode::SetGlobal,
 ];
 
 impl From<u8> for OpCode {
@@ -162,7 +164,8 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Print => simple_instruction("Print"),
         OpCode::Pop => simple_instruction("Pop"),
         OpCode::DefineGlobal => constant_instruction("DefineGlobal", chunk, offset),
-        OpCode::LoadGlobal => constant_instruction("LoadGlobal", chunk, offset),
+        OpCode::GetGlobal => constant_instruction("GetGlobal", chunk, offset),
+        OpCode::SetGlobal => constant_instruction("SetGlobal", chunk, offset),
     }
 }
 

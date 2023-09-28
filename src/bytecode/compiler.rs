@@ -53,8 +53,8 @@ const PREC_UNARY: u32 = 8; // ! -
 //const PREC_CALL: u32 = 9; // . ()
 
 struct ParseRule {
-    prefix: Option<fn(&mut Compiler) -> UnitResult>,
-    infix: Option<fn(&mut Compiler) -> UnitResult>,
+    prefix: Option<fn(&mut Compiler, bool) -> UnitResult>,
+    infix: Option<fn(&mut Compiler, bool) -> UnitResult>,
     precedence: u32,
 }
 
@@ -229,40 +229,38 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
     let prefix_rule = get_rule(compiler.parser.previous.token_type).prefix;
     let prefix_rule = prefix_rule
         .ok_or_else(|| build_error("Expect expression.", compiler.parser.previous.line))?;
-    prefix_rule(compiler)?;
+
+    // the target for assignment must be an expression with PREC_ASSIGNMENT or lower precedence
+    let can_assign = precedence <= PREC_ASSIGNMENT;
+    prefix_rule(compiler, can_assign)?;
 
     while precedence <= get_rule(compiler.parser.current.token_type).precedence {
         compiler.parser.advance()?;
         let infix_rule = get_rule(compiler.parser.previous.token_type).infix.unwrap();
-        infix_rule(compiler)?;
+        infix_rule(compiler, can_assign)?;
+    }
+
+    // detected assignment but the target expression didn't consume the equal token, improve the error message for this invalid formation
+    if can_assign && compiler.advance_if_match(TokenType::Equal)? {
+        return Err(build_error("Invalid assignment target.", compiler.parser.previous.line))
     }
 
     Ok(())
 }
 
-fn string(compiler: &mut Compiler) -> UnitResult {
-    let token = &compiler.parser.previous;
-    if token.token_type == TokenType::String {
-        let address = compiler.chunk.add_constant(token.extract_string().to_owned().into());
-        compiler.emit_data_op(OpCode::Constant, address);
-    } else {
-        panic!("Token at line {} is not a number.", token.line);
-    }
+fn string(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let address = compiler.chunk.add_constant(compiler.parser.previous.extract_string().to_owned().into());
+    compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
-fn number(compiler: &mut Compiler) -> UnitResult {
-    let token = &compiler.parser.previous;
-    if token.token_type == TokenType::Number {
-        let address = compiler.chunk.add_constant(token.extract_number().into());
-        compiler.emit_data_op(OpCode::Constant, address);
-    } else {
-        panic!("Token at line {} is not a number.", token.line);
-    }
+fn number(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let address = compiler.chunk.add_constant(compiler.parser.previous.extract_number().into());
+    compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
-fn literal(compiler: &mut Compiler) -> UnitResult {
+fn literal(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     match compiler.parser.previous.token_type {
         TokenType::Nil => compiler.emit_op(OpCode::Nil),
         TokenType::True => compiler.emit_op(OpCode::True),
@@ -275,25 +273,26 @@ fn literal(compiler: &mut Compiler) -> UnitResult {
     Ok(())
 }
 
-fn variable(compiler: &mut Compiler) -> UnitResult {
-    let token = &compiler.parser.previous;
-    if token.token_type == TokenType::Identifier {
-        // save the variable name as a string in the constant table
-        let constant_index = compiler.chunk.add_constant(Value::from(token.extract_name().clone()));
-        compiler.emit_data_op(OpCode::LoadGlobal, constant_index);
+fn variable(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
+    // save the variable name as a string in the constant table
+    let constant_index = compiler.chunk.add_constant(Value::from(compiler.parser.previous.extract_name().clone()));
+    // determine whether loading value from or storing value into the variable
+    if can_assign && compiler.advance_if_match(TokenType::Equal)? {
+        expression(compiler)?;
+        compiler.emit_data_op(OpCode::SetGlobal, constant_index);
     } else {
-        panic!("Token at line {} is not a variable.", token.line);
+        compiler.emit_data_op(OpCode::GetGlobal, constant_index);
     }
     Ok(())
 }
 
-fn grouping(compiler: &mut Compiler) -> UnitResult {
+fn grouping(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     expression(compiler)?;
     compiler.consume(TokenType::RightParen, "Expect ')' after expression.")?;
     Ok(())
 }
 
-fn unary(compiler: &mut Compiler) -> UnitResult {
+fn unary(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     let token_type = compiler.parser.previous.token_type;
     // compile operand
     parse_precedence(compiler, PREC_UNARY)?;
@@ -305,7 +304,7 @@ fn unary(compiler: &mut Compiler) -> UnitResult {
     Ok(())
 }
 
-fn binary(compiler: &mut Compiler) -> UnitResult {
+fn binary(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     let token_type = compiler.parser.previous.token_type;
     let rule = get_rule(token_type);
     parse_precedence(compiler, rule.precedence + 1)?;
