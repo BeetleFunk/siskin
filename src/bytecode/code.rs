@@ -17,9 +17,13 @@ pub enum OpCode {
     Nil,
     True,
     False,
+    Print,
+    Pop,
+    DefineGlobal,
+    LoadGlobal,
 }
 
-const OP_TABLE: [OpCode; 14] = [
+const OP_TABLE: [OpCode; 18] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -34,6 +38,10 @@ const OP_TABLE: [OpCode; 14] = [
     OpCode::Nil,
     OpCode::True,
     OpCode::False,
+    OpCode::Print,
+    OpCode::Pop,
+    OpCode::DefineGlobal,
+    OpCode::LoadGlobal,
 ];
 
 impl From<u8> for OpCode {
@@ -138,7 +146,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     let opcode = OpCode::from(chunk.code[offset]);
     match opcode {
         OpCode::Return => simple_instruction("Return"),
-        OpCode::Constant => constant_instruction(chunk, offset),
+        OpCode::Constant => constant_instruction("Constant", chunk, offset),
         OpCode::Negate => simple_instruction("Negate"),
         OpCode::Not => simple_instruction("Not"),
         OpCode::Equal => simple_instruction("Equal"),
@@ -151,6 +159,10 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Nil => simple_instruction("Nil"),
         OpCode::True => simple_instruction("True"),
         OpCode::False => simple_instruction("False"),
+        OpCode::Print => simple_instruction("Print"),
+        OpCode::Pop => simple_instruction("Pop"),
+        OpCode::DefineGlobal => constant_instruction("DefineGlobal", chunk, offset),
+        OpCode::LoadGlobal => constant_instruction("LoadGlobal", chunk, offset),
     }
 }
 
@@ -159,9 +171,9 @@ fn simple_instruction(name: &str) -> usize {
     1
 }
 
-fn constant_instruction(chunk: &Chunk, offset: usize) -> usize {
+fn constant_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
     let index = chunk.code[offset + 1];
     let value = &chunk.values[index as usize];
-    println!("Constant {index:04} = {value}");
+    println!("{opcode_name} {index:04} = {value}");
     2
 }

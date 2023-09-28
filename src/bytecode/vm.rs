@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::result;
 
 use crate::error::BasicError;
@@ -10,6 +11,7 @@ static DEBUG_TRACING: bool = true;
 struct State {
     ip: usize,
     stack: Vec<Value>,
+    globals: HashMap<String, Value>,
 }
 
 impl State {
@@ -17,6 +19,7 @@ impl State {
         State {
             ip: 0,
             stack: Vec::new(),
+            globals: HashMap::new(),
         }
     }
 }
@@ -40,7 +43,6 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
 
         match opcode {
             OpCode::Return => {
-                println!("{}", state.stack.pop().expect("Stack should have an entry for return."));
                 break;
             }
             OpCode::Constant => {
@@ -51,14 +53,20 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if let Value::Number(value) = state.stack.pop().unwrap() {
                     state.stack.push(Value::from(-value));
                 } else {
-                    return Err(build_error("Negation requires numeric operand", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Negation requires numeric operand",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Not => {
                 if let Value::Bool(value) = state.stack.pop().unwrap() {
                     state.stack.push(Value::from(!value));
                 } else {
-                    return Err(build_error("Boolean inversion requires boolean operand", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Boolean inversion requires boolean operand",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Equal => {
@@ -71,7 +79,10 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if let (Value::Number(a), Value::Number(b)) = operands {
                     state.stack.push(Value::from(a > b));
                 } else {
-                    return Err(build_error("Comparison requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Comparison requires numeric operands",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Less => {
@@ -79,7 +90,10 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if let (Value::Number(a), Value::Number(b)) = operands {
                     state.stack.push(Value::from(a < b));
                 } else {
-                    return Err(build_error("Comparison requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Comparison requires numeric operands",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Add => {
@@ -89,7 +103,10 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 } else if let (Value::String(a), Value::String(b)) = operands {
                     state.stack.push(Value::from(a + &b));
                 } else {
-                    return Err(build_error("Addition requires either numeric or string operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Addition requires either numeric or string operands",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Subtract => {
@@ -97,7 +114,10 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if let (Value::Number(a), Value::Number(b)) = operands {
                     state.stack.push(Value::from(a - b));
                 } else {
-                    return Err(build_error("Subtraction requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Subtraction requires numeric operands",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Multiply => {
@@ -105,7 +125,10 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if let (Value::Number(a), Value::Number(b)) = operands {
                     state.stack.push(Value::from(a * b));
                 } else {
-                    return Err(build_error("Multiplication requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Multiplication requires numeric operands",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Divide => {
@@ -113,12 +136,41 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                 if let (Value::Number(a), Value::Number(b)) = operands {
                     state.stack.push(Value::from(a / b));
                 } else {
-                    return Err(build_error("Division requires numeric operands", chunk.line_numbers[state.ip - 1]));
+                    return Err(build_error(
+                        "Division requires numeric operands",
+                        chunk.line_numbers[state.ip - 1],
+                    ));
                 }
             }
             OpCode::Nil => state.stack.push(Value::Nil),
             OpCode::True => state.stack.push(Value::Bool(true)),
             OpCode::False => state.stack.push(Value::Bool(false)),
+            OpCode::Print => println!("{}", state.stack.pop().unwrap()),
+            OpCode::Pop => {
+                state.stack.pop();
+            }
+            OpCode::DefineGlobal => {
+                if let Value::String(name) = read_constant(&mut state, chunk) {
+                    let value = state.stack.pop().unwrap();
+                    state.globals.insert(name, value);
+                } else {
+                    panic!("DefineGlobal must have a string constant for the variable name.");
+                }
+            }
+            OpCode::LoadGlobal => {
+                if let Value::String(name) = read_constant(&mut state, chunk) {
+                    if let Some(value) = state.globals.get(&name) {
+                        state.stack.push(value.clone());
+                    } else {
+                        return Err(build_error(
+                            &format!("Undefined variable {name}."),
+                            chunk.line_numbers[state.ip - 1],
+                        ));
+                    }
+                } else {
+                    panic!("LoadGlobal must have a string constant for the variable name.");
+                }
+            }
         }
     }
 
@@ -146,7 +198,7 @@ fn pop_binary_operands(stack: &mut Vec<Value>) -> (Value, Value) {
 fn print_stack(stack: &Vec<Value>) {
     print!("          ");
     for entry in stack {
-      print!("[ {entry} ]");
+        print!("[ {entry} ]");
     }
     println!();
 }

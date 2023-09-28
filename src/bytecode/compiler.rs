@@ -4,7 +4,7 @@ use std::result;
 use crate::error::BasicError;
 use crate::scanner::{Scanner, Token, TokenType};
 
-use super::code::{self, Chunk, OpCode};
+use super::code::{self, Chunk, OpCode, Value};
 
 type UnitResult = result::Result<(), BasicError>;
 
@@ -80,7 +80,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::GreaterEqual,   ParseRule { prefix: None,           infix: Some(binary),    precedence: PREC_COMPARISON }),
     (TokenType::Less,           ParseRule { prefix: None,           infix: Some(binary),    precedence: PREC_COMPARISON }),
     (TokenType::LessEqual,      ParseRule { prefix: None,           infix: Some(binary),    precedence: PREC_COMPARISON }),
-    (TokenType::Identifier,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::Identifier,     ParseRule { prefix: Some(variable), infix: None,            precedence: PREC_NONE }),
     (TokenType::String,         ParseRule { prefix: Some(string),   infix: None,            precedence: PREC_NONE }),
     (TokenType::Number,         ParseRule { prefix: Some(number),   infix: None,            precedence: PREC_NONE }),
     (TokenType::And,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -114,11 +114,8 @@ pub fn compile(source: &str) -> result::Result<Chunk, BasicError> {
     // TBD: Should compiler own these or not?
     let mut compiler = Compiler::new(parser, chunk);
 
-    expression(&mut compiler)?;
-
-    // This should always be the last token?
-    if compiler.parser.current.token_type != TokenType::Eof {
-        panic!("Expect EOF token type as the final scanner token.")
+    while compiler.parser.current.token_type != TokenType::Eof {
+        declaration(&mut compiler)?;
     }
 
     compiler.emit_op(OpCode::Return);
@@ -154,14 +151,73 @@ impl Compiler {
         self.chunk.write(byte2, self.parser.previous.line);
     }
 
-    fn consume(&mut self, expected: TokenType, error_msg: &str) -> UnitResult {
-        if self.parser.current.token_type == expected {
+    fn advance_if_match(&mut self, token_type: TokenType) -> Result<bool, BasicError> {
+        if self.parser.current.token_type == token_type {
             self.parser.advance()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn consume(&mut self, expected: TokenType, error_msg: &str) -> UnitResult {
+        if self.advance_if_match(expected)? {
             Ok(())
         } else {
             Err(build_error(error_msg, self.parser.current.line))
         }
     }
+}
+
+fn declaration(compiler: &mut Compiler) -> UnitResult {
+    if compiler.advance_if_match(TokenType::Var)? {
+        var_declaration(compiler)
+    } else {
+        statement(compiler)
+    }
+}
+
+fn var_declaration(compiler: &mut Compiler) -> UnitResult {
+    compiler.consume(TokenType::Identifier, "Expect variable name.")?;
+    // save the variable name as a string in the constant table
+    let constant_index = compiler.chunk.add_constant(Value::from(compiler.parser.previous.extract_name().clone()));
+
+    if compiler.advance_if_match(TokenType::Equal)? {
+        expression(compiler)?;
+    } else {
+        compiler.emit_op(OpCode::Nil);
+    }
+
+    compiler.consume(TokenType::Semicolon, "Expect ';' after variable declaration.")?;
+    
+    define_global(compiler, constant_index);
+    Ok(())
+}
+
+fn define_global(compiler: &mut Compiler, index: u8) {
+    compiler.emit_data_op(OpCode::DefineGlobal, index);
+}
+
+fn statement(compiler: &mut Compiler) -> UnitResult {
+    if compiler.advance_if_match(TokenType::Print)? {
+        print_statement(compiler)
+    } else {
+        expression_statement(compiler)
+    }
+}
+
+fn print_statement(compiler: &mut Compiler) -> UnitResult {
+    expression(compiler)?;
+    compiler.consume(TokenType::Semicolon, "Expect ';' after print statement.")?;
+    compiler.emit_op(OpCode::Print);
+    Ok(())
+}
+
+fn expression_statement(compiler: &mut Compiler) -> UnitResult {
+    expression(compiler)?;
+    compiler.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
+    compiler.emit_op(OpCode::Pop);
+    Ok(())
 }
 
 fn expression(compiler: &mut Compiler) -> UnitResult {
@@ -215,6 +271,18 @@ fn literal(compiler: &mut Compiler) -> UnitResult {
             "Token at line {} is not a literal.",
             compiler.parser.previous.line
         ),
+    }
+    Ok(())
+}
+
+fn variable(compiler: &mut Compiler) -> UnitResult {
+    let token = &compiler.parser.previous;
+    if token.token_type == TokenType::Identifier {
+        // save the variable name as a string in the constant table
+        let constant_index = compiler.chunk.add_constant(Value::from(token.extract_name().clone()));
+        compiler.emit_data_op(OpCode::LoadGlobal, constant_index);
+    } else {
+        panic!("Token at line {} is not a variable.", token.line);
     }
     Ok(())
 }
