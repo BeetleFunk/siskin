@@ -1,12 +1,12 @@
 use std::mem;
 use std::result;
 
-use crate::error::BasicError;
+use crate::error::{BasicError, BasicResult};
 use crate::scanner::{Scanner, Token, TokenType};
 
 use super::code::{self, Chunk, OpCode, Value};
 
-type UnitResult = result::Result<(), BasicError>;
+type UnitResult = BasicResult<()>;
 
 static DEBUG_DUMP_CHUNK: bool = true;
 
@@ -43,14 +43,14 @@ impl Parser {
 // parsing precedence values
 const PREC_NONE: u32 = 0;
 const PREC_ASSIGNMENT: u32 = 1; // =
-//const PREC_OR: u32 = 2; // or
-//const PREC_AND: u32 = 3; // and
+                                //const PREC_OR: u32 = 2; // or
+                                //const PREC_AND: u32 = 3; // and
 const PREC_EQUALITY: u32 = 4; // == !=
 const PREC_COMPARISON: u32 = 5; // < > <= >=
 const PREC_TERM: u32 = 6; // + -
 const PREC_FACTOR: u32 = 7; // * /
 const PREC_UNARY: u32 = 8; // ! -
-//const PREC_CALL: u32 = 9; // . ()
+                           //const PREC_CALL: u32 = 9; // . ()
 
 struct ParseRule {
     prefix: Option<fn(&mut Compiler, bool) -> UnitResult>,
@@ -130,11 +130,23 @@ pub fn compile(source: &str) -> result::Result<Chunk, BasicError> {
 struct Compiler {
     parser: Parser,
     chunk: Chunk,
+    locals: Vec<Local>,
+    scope_depth: u32,
+}
+
+struct Local {
+    name: Token,
+    depth: u32,
 }
 
 impl Compiler {
     fn new(parser: Parser, chunk: Chunk) -> Compiler {
-        Compiler { parser, chunk }
+        Compiler {
+            parser,
+            chunk,
+            locals: Vec::new(),
+            scope_depth: 0,
+        }
     }
 
     fn emit_op(&mut self, byte: OpCode) {
@@ -167,6 +179,48 @@ impl Compiler {
             Err(build_error(error_msg, self.parser.current.line))
         }
     }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+
+        while let Some(last) = self.locals.last() {
+            if last.depth > self.scope_depth {
+                self.locals.pop();
+                self.emit_op(OpCode::Pop);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn add_local(&mut self, name: Token) {
+        if self.locals.len() >= u8::MAX.into() {
+            panic!("Locals in scope limited to 256 entries at the moment.");
+        }
+
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+        })
+    }
+
+    fn compute_local_index(&self, name: &str) -> Option<u8> {
+        if let Some((match_index, _)) = self
+            .locals
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|entry| entry.1.name.lexeme == name)
+        {
+            Some(match_index as u8)
+        } else {
+            None
+        }
+    }
 }
 
 fn declaration(compiler: &mut Compiler) -> UnitResult {
@@ -179,18 +233,31 @@ fn declaration(compiler: &mut Compiler) -> UnitResult {
 
 fn var_declaration(compiler: &mut Compiler) -> UnitResult {
     compiler.consume(TokenType::Identifier, "Expect variable name.")?;
-    // save the variable name as a string in the constant table
-    let constant_index = compiler.chunk.add_constant(Value::from(compiler.parser.previous.extract_name().clone()));
+    let identifier = compiler.parser.previous.clone();
 
+    // compile the expression before adding the local variable entry, this makes variable shadowing work properly
     if compiler.advance_if_match(TokenType::Equal)? {
         expression(compiler)?;
     } else {
         compiler.emit_op(OpCode::Nil);
     }
 
-    compiler.consume(TokenType::Semicolon, "Expect ';' after variable declaration.")?;
-    
-    define_global(compiler, constant_index);
+    compiler.consume(
+        TokenType::Semicolon,
+        "Expect ';' after variable declaration.",
+    )?;
+
+    if compiler.scope_depth == 0 {
+        // for global vars, save the variable name as a string in the constant table
+        let index = compiler
+            .chunk
+            .add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
+        define_global(compiler, index);
+    } else {
+        // for local vars, add the identifier name to the list of locals
+        compiler.add_local(identifier);
+    }
+
     Ok(())
 }
 
@@ -199,11 +266,29 @@ fn define_global(compiler: &mut Compiler, index: u8) {
 }
 
 fn statement(compiler: &mut Compiler) -> UnitResult {
-    if compiler.advance_if_match(TokenType::Print)? {
+    if compiler.advance_if_match(TokenType::LeftBrace)? {
+        compiler.begin_scope();
+        let result = block(compiler);
+        compiler.end_scope();
+        result
+    } else if compiler.advance_if_match(TokenType::Print)? {
         print_statement(compiler)
     } else {
         expression_statement(compiler)
     }
+}
+
+fn block(compiler: &mut Compiler) -> UnitResult {
+    loop {
+        if compiler.parser.current.token_type == TokenType::RightBrace
+            || compiler.parser.current.token_type == TokenType::Eof
+        {
+            break;
+        }
+        declaration(compiler)?;
+    }
+    compiler.consume(TokenType::RightBrace, "Expect '}' after block.")?;
+    Ok(())
 }
 
 fn print_statement(compiler: &mut Compiler) -> UnitResult {
@@ -242,20 +327,27 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
 
     // detected assignment but the target expression didn't consume the equal token, improve the error message for this invalid formation
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
-        return Err(build_error("Invalid assignment target.", compiler.parser.previous.line))
+        return Err(build_error(
+            "Invalid assignment target.",
+            compiler.parser.previous.line,
+        ));
     }
 
     Ok(())
 }
 
 fn string(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    let address = compiler.chunk.add_constant(compiler.parser.previous.extract_string().to_owned().into());
+    let address = compiler
+        .chunk
+        .add_constant(compiler.parser.previous.extract_string().to_owned().into());
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
 fn number(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    let address = compiler.chunk.add_constant(compiler.parser.previous.extract_number().into());
+    let address = compiler
+        .chunk
+        .add_constant(compiler.parser.previous.extract_number().into());
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
@@ -274,14 +366,24 @@ fn literal(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
 }
 
 fn variable(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
-    // save the variable name as a string in the constant table
-    let constant_index = compiler.chunk.add_constant(Value::from(compiler.parser.previous.extract_name().clone()));
+    let name = compiler.parser.previous.extract_name();
+    let index: u8;
+    // look first for a matching local variable
+    let opcodes = if let Some(local_index) = compiler.compute_local_index(name) {
+        // use the stack offset as the opcode data
+        index = local_index;
+        (OpCode::SetLocal, OpCode::GetLocal)
+    } else {
+        // save the global variable name as a string in the constant table
+        index = compiler.chunk.add_constant(Value::from(name.clone()));
+        (OpCode::SetGlobal, OpCode::GetGlobal)
+    };
     // determine whether loading value from or storing value into the variable
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
         expression(compiler)?;
-        compiler.emit_data_op(OpCode::SetGlobal, constant_index);
+        compiler.emit_data_op(opcodes.0, index);
     } else {
-        compiler.emit_data_op(OpCode::GetGlobal, constant_index);
+        compiler.emit_data_op(opcodes.1, index);
     }
     Ok(())
 }

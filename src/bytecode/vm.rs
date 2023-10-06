@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::result;
+use std::io::Write;
 
-use crate::error::BasicError;
+use crate::error::{BasicError, BasicResult};
 
 use super::code::{self, Chunk, OpCode, Value};
 use super::compiler;
@@ -24,12 +24,12 @@ impl State {
     }
 }
 
-pub fn interpret(source: &str) -> result::Result<(), BasicError> {
+pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
     let chunk = compiler::compile(source)?;
-    execute(&chunk)
+    execute(&chunk, output)
 }
 
-fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
+fn execute(chunk: &Chunk, output: &mut dyn Write) -> BasicResult<()> {
     let mut state = State::new();
 
     while state.ip < chunk.code.len() {
@@ -145,7 +145,7 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
             OpCode::Nil => state.stack.push(Value::Nil),
             OpCode::True => state.stack.push(Value::Bool(true)),
             OpCode::False => state.stack.push(Value::Bool(false)),
-            OpCode::Print => println!("{}", state.stack.pop().unwrap()),
+            OpCode::Print => writeln!(output, "{}", state.stack.pop().unwrap()).expect("Output writer should succeed."),
             OpCode::Pop => {
                 state.stack.pop();
             }
@@ -187,15 +187,28 @@ fn execute(chunk: &Chunk) -> result::Result<(), BasicError> {
                     panic!("LoadGlobal must have a string constant for the variable name.");
                 }
             }
+            OpCode::GetLocal => {
+                let slot = read_byte(&mut state, chunk);
+                state.stack.push(state.stack[slot as usize].clone());
+            }
+            OpCode::SetLocal => {
+                let slot = read_byte(&mut state, chunk);
+                state.stack[slot as usize] = state.stack.last().unwrap().clone();
+            }
         }
     }
 
     Ok(())
 }
 
-fn read_constant(state: &mut State, chunk: &Chunk) -> Value {
-    let index = chunk.code[state.ip];
+fn read_byte(state: &mut State, chunk: &Chunk) -> u8 {
+    let byte = chunk.code[state.ip];
     state.ip += 1;
+    byte
+}
+
+fn read_constant(state: &mut State, chunk: &Chunk) -> Value {
+    let index = read_byte(state, chunk);
 
     let value = &chunk.values[index as usize];
 

@@ -22,9 +22,11 @@ pub enum OpCode {
     DefineGlobal,
     GetGlobal,
     SetGlobal,
+    GetLocal,
+    SetLocal,
 }
 
-const OP_TABLE: [OpCode; 19] = [
+const OP_TABLE: [OpCode; 21] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -44,6 +46,8 @@ const OP_TABLE: [OpCode; 19] = [
     OpCode::DefineGlobal,
     OpCode::GetGlobal,
     OpCode::SetGlobal,
+    OpCode::GetLocal,
+    OpCode::SetLocal,
 ];
 
 impl From<u8> for OpCode {
@@ -166,12 +170,20 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::DefineGlobal => constant_instruction("DefineGlobal", chunk, offset),
         OpCode::GetGlobal => constant_instruction("GetGlobal", chunk, offset),
         OpCode::SetGlobal => constant_instruction("SetGlobal", chunk, offset),
+        OpCode::GetLocal => byte_instruction("GetLocal", chunk, offset),
+        OpCode::SetLocal => byte_instruction("SetLocal", chunk, offset),
     }
 }
 
 fn simple_instruction(name: &str) -> usize {
     println!("{name}");
     1
+}
+
+fn byte_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
+    let byte = chunk.code[offset + 1];
+    println!("{opcode_name} {byte:04}");
+    2
 }
 
 fn constant_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {

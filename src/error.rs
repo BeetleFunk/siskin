@@ -3,10 +3,11 @@ use std::fmt;
 use std::result;
 
 pub type GenericResult<T> = result::Result<T, Box<dyn Error>>;
+pub type BasicResult<T> = result::Result<T, BasicError>;
 
 #[derive(Debug)]
 pub struct BasicError {
-    description: String,
+    pub description: String,
 }
 
 impl BasicError {

@@ -2,12 +2,12 @@ mod code;
 mod compiler;
 mod vm;
 
+use std::io::Write;
+
 use crate::error;
 
-pub type ExecutionResult = error::GenericResult<()>;
-
-pub fn execute(code: &str) -> ExecutionResult {
-    vm::interpret(code)?;
+pub fn execute(code: &str, output: &mut dyn Write) -> error::BasicResult<()> {
+    vm::interpret(code, output)?;
     Ok(())
 }
 
