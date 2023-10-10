@@ -145,7 +145,8 @@ fn execute(chunk: &Chunk, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Nil => state.stack.push(Value::Nil),
             OpCode::True => state.stack.push(Value::Bool(true)),
             OpCode::False => state.stack.push(Value::Bool(false)),
-            OpCode::Print => writeln!(output, "{}", state.stack.pop().unwrap()).expect("Output writer should succeed."),
+            OpCode::Print => writeln!(output, "{}", state.stack.pop().unwrap())
+                .expect("Output writer should succeed."),
             OpCode::Pop => {
                 state.stack.pop();
             }
@@ -195,6 +196,23 @@ fn execute(chunk: &Chunk, output: &mut dyn Write) -> BasicResult<()> {
                 let slot = read_byte(&mut state, chunk);
                 state.stack[slot as usize] = state.stack.last().unwrap().clone();
             }
+            OpCode::Jump => {
+                let offset = read_short(&mut state, chunk);
+                state.ip += offset as usize;
+            }
+            OpCode::JumpIfFalse => {
+                let offset = read_short(&mut state, chunk);
+                if let Value::Bool(condition_value) = state.stack.last().unwrap() {
+                    if !condition_value {
+                        state.ip += offset as usize;
+                    }
+                } else {
+                    return Err(build_error(
+                        "if statement requires boolean condition",
+                        chunk.line_numbers[state.ip - 2],
+                    ));
+                }
+            }
         }
     }
 
@@ -205,6 +223,13 @@ fn read_byte(state: &mut State, chunk: &Chunk) -> u8 {
     let byte = chunk.code[state.ip];
     state.ip += 1;
     byte
+}
+
+fn read_short(state: &mut State, chunk: &Chunk) -> u16 {
+    let high_byte = chunk.code[state.ip];
+    let low_byte = chunk.code[state.ip + 1];
+    state.ip += 2;
+    ((high_byte as u16) << 8) + low_byte as u16
 }
 
 fn read_constant(state: &mut State, chunk: &Chunk) -> Value {

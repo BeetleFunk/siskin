@@ -1,5 +1,5 @@
-use siskin::error;
 use siskin::bytecode;
+use siskin::error;
 use siskin::error::BasicResult;
 
 type TestResult = BasicResult<()>;
@@ -109,6 +109,57 @@ fn bind_to_global() -> TestResult {
     let result = run(code);
     let error = result.unwrap_err();
     assert!(error.description.contains("Undefined variable"));
+
+    Ok(())
+}
+
+#[test]
+fn if_statement() -> TestResult {
+    let code = "\
+        if (5 < 7) {
+            print \"first true\";
+        }
+        if (false) {
+            print \"second true\";
+        }";
+
+        let output = run(code)?;
+        let expected = "\
+            first true\n";
+    
+        assert_eq!(expected, output);
+
+    Ok(())
+}
+
+#[test]
+fn if_else_statement() -> TestResult {
+    let code = "\
+        if (5 + 7 < 9000) {
+            print \"hit then\";
+        } else {
+            print \"hit else\";
+        }
+        
+        if (false) {
+            print \"hit then\";
+        } else if (true) {
+            print \"hit else if\";
+        }
+        
+        if (6 == 5) {
+            print \"hit then\";
+        } else if(6 == 7) {
+            print \"hit else if\";
+        } else {
+            print \"hit final else\";
+        }";
+
+        let output = run(code)?;
+        let expected = "\
+            hit then\nhit else if\nhit final else\n";
+    
+        assert_eq!(expected, output);
 
     Ok(())
 }

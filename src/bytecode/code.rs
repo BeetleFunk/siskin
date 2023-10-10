@@ -24,9 +24,11 @@ pub enum OpCode {
     SetGlobal,
     GetLocal,
     SetLocal,
+    Jump,
+    JumpIfFalse,
 }
 
-const OP_TABLE: [OpCode; 21] = [
+const OP_TABLE: [OpCode; 23] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -48,6 +50,8 @@ const OP_TABLE: [OpCode; 21] = [
     OpCode::SetGlobal,
     OpCode::GetLocal,
     OpCode::SetLocal,
+    OpCode::Jump,
+    OpCode::JumpIfFalse,
 ];
 
 impl From<u8> for OpCode {
@@ -61,7 +65,7 @@ pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
-    String(String)
+    String(String),
 }
 
 impl fmt::Display for Value {
@@ -172,6 +176,8 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::SetGlobal => constant_instruction("SetGlobal", chunk, offset),
         OpCode::GetLocal => byte_instruction("GetLocal", chunk, offset),
         OpCode::SetLocal => byte_instruction("SetLocal", chunk, offset),
+        OpCode::Jump => short_instruction("Jump", chunk, offset),
+        OpCode::JumpIfFalse => short_instruction("JumpIfFalse", chunk, offset),
     }
 }
 
@@ -180,6 +186,7 @@ fn simple_instruction(name: &str) -> usize {
     1
 }
 
+// instruction with a single byte of data
 fn byte_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
     let byte = chunk.code[offset + 1];
     println!("{opcode_name} {byte:04}");
@@ -191,4 +198,13 @@ fn constant_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usiz
     let value = &chunk.values[index as usize];
     println!("{opcode_name} {index:04} = {value}");
     2
+}
+
+// instruction with two bytes of data
+fn short_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
+    let high_byte = chunk.code[offset + 1];
+    let low_byte = chunk.code[offset + 2];
+    let short = ((high_byte as u16) << 8) + low_byte as u16;
+    println!("{opcode_name} {short:06}");
+    3
 }

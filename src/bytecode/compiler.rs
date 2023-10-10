@@ -163,6 +163,11 @@ impl Compiler {
         self.chunk.write(byte2, self.parser.previous.line);
     }
 
+    fn emit_data(&mut self, byte1: u8, byte2: u8) {
+        self.chunk.write(byte1, self.parser.previous.line);
+        self.chunk.write(byte2, self.parser.previous.line);
+    }
+
     fn advance_if_match(&mut self, token_type: TokenType) -> Result<bool, BasicError> {
         if self.parser.current.token_type == token_type {
             self.parser.advance()?;
@@ -271,6 +276,8 @@ fn statement(compiler: &mut Compiler) -> UnitResult {
         let result = block(compiler);
         compiler.end_scope();
         result
+    } else if compiler.advance_if_match(TokenType::If)? {
+        if_statement(compiler)
     } else if compiler.advance_if_match(TokenType::Print)? {
         print_statement(compiler)
     } else {
@@ -289,6 +296,44 @@ fn block(compiler: &mut Compiler) -> UnitResult {
     }
     compiler.consume(TokenType::RightBrace, "Expect '}' after block.")?;
     Ok(())
+}
+
+fn if_statement(compiler: &mut Compiler) -> UnitResult {
+    compiler.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
+    expression(compiler)?;
+    compiler.consume(TokenType::RightParen, "Expect ')' after condition.")?;
+
+    let jump_over_then = init_jump(compiler, OpCode::JumpIfFalse);
+
+    // setup then branch
+    compiler.emit_op(OpCode::Pop);
+    statement(compiler)?;
+    let jump_over_else = init_jump(compiler, OpCode::Jump);
+    patch_jump(compiler, jump_over_then);
+
+    // setup else branch
+    compiler.emit_op(OpCode::Pop);
+    if compiler.advance_if_match(TokenType::Else)? {
+        statement(compiler)?;
+    }
+    patch_jump(compiler, jump_over_else);
+
+    Ok(())
+}
+
+fn init_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
+    compiler.emit_op(opcode);
+    compiler.emit_data(0xff, 0xff);
+    compiler.chunk.code.len() - 2
+}
+
+fn patch_jump(compiler: &mut Compiler, offset: usize) {
+    let jump_distance = compiler.chunk.code.len() - offset - 2;
+    if jump_distance >  (u16::MAX as usize) {
+        panic!("Exceeded maximum jump size.");
+    }
+    compiler.chunk.code[offset] = (jump_distance >> 8) as u8;
+    compiler.chunk.code[offset + 1] = jump_distance as u8;
 }
 
 fn print_statement(compiler: &mut Compiler) -> UnitResult {
