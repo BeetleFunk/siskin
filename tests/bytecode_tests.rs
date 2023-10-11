@@ -163,3 +163,55 @@ fn if_else_statement() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn logical_and() -> TestResult {
+    let code = "\
+        if (6 - 2 < 7 and false) {
+            print \"condition true\";
+        } else {
+            print \"condition false\";
+        }
+        
+        if (8 > 2 and !false) {
+            print \"condition true\";
+        } else {
+            print \"condition false\";
+        }";
+
+        let output = run(code)?;
+        let expected = "condition false\ncondition true\n";
+    
+        assert_eq!(expected, output);
+
+    Ok(())
+}
+
+#[test]
+fn logical_or() -> TestResult {
+    let code = "\
+        if (6 - 2 < 7 or false) {
+            print \"condition true\";
+        } else {
+            print \"condition false\";
+        }
+        
+        if (8 > 2 or !false) {
+            print \"condition true\";
+        } else {
+            print \"condition false\";
+        }
+        
+        if (4 > 9 or 9 < 4) {
+            print \"condition true\";
+        } else {
+            print \"condition false\";
+        }";
+
+        let output = run(code)?;
+        let expected = "condition true\ncondition true\ncondition false\n";
+    
+        assert_eq!(expected, output);
+
+    Ok(())
+}

@@ -43,8 +43,8 @@ impl Parser {
 // parsing precedence values
 const PREC_NONE: u32 = 0;
 const PREC_ASSIGNMENT: u32 = 1; // =
-                                //const PREC_OR: u32 = 2; // or
-                                //const PREC_AND: u32 = 3; // and
+const PREC_OR: u32 = 2; // or
+const PREC_AND: u32 = 3; // and
 const PREC_EQUALITY: u32 = 4; // == !=
 const PREC_COMPARISON: u32 = 5; // < > <= >=
 const PREC_TERM: u32 = 6; // + -
@@ -83,7 +83,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::Identifier,     ParseRule { prefix: Some(variable), infix: None,            precedence: PREC_NONE }),
     (TokenType::String,         ParseRule { prefix: Some(string),   infix: None,            precedence: PREC_NONE }),
     (TokenType::Number,         ParseRule { prefix: Some(number),   infix: None,            precedence: PREC_NONE }),
-    (TokenType::And,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::And,            ParseRule { prefix: None,           infix: Some(logic_and), precedence: PREC_AND }),
     (TokenType::Class,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Else,           ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::False,          ParseRule { prefix: Some(literal),  infix: None,            precedence: PREC_NONE }),
@@ -91,7 +91,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::Fun,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::If,             ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Nil,            ParseRule { prefix: Some(literal),  infix: None,            precedence: PREC_NONE }),
-    (TokenType::Or,             ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::Or,             ParseRule { prefix: None,           infix: Some(logic_or),  precedence: PREC_OR }),
     (TokenType::Print,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Return,         ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Super,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -303,12 +303,12 @@ fn if_statement(compiler: &mut Compiler) -> UnitResult {
     expression(compiler)?;
     compiler.consume(TokenType::RightParen, "Expect ')' after condition.")?;
 
-    let jump_over_then = init_jump(compiler, OpCode::JumpIfFalse);
+    let jump_over_then = emit_jump(compiler, OpCode::JumpIfFalse);
 
     // setup then branch
     compiler.emit_op(OpCode::Pop);
     statement(compiler)?;
-    let jump_over_else = init_jump(compiler, OpCode::Jump);
+    let jump_over_else = emit_jump(compiler, OpCode::Jump);
     patch_jump(compiler, jump_over_then);
 
     // setup else branch
@@ -321,7 +321,7 @@ fn if_statement(compiler: &mut Compiler) -> UnitResult {
     Ok(())
 }
 
-fn init_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
+fn emit_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
     compiler.emit_op(opcode);
     compiler.emit_data(0xff, 0xff);
     compiler.chunk.code.len() - 2
@@ -329,7 +329,7 @@ fn init_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
 
 fn patch_jump(compiler: &mut Compiler, offset: usize) {
     let jump_distance = compiler.chunk.code.len() - offset - 2;
-    if jump_distance >  (u16::MAX as usize) {
+    if jump_distance > (u16::MAX as usize) {
         panic!("Exceeded maximum jump size.");
     }
     compiler.chunk.code[offset] = (jump_distance >> 8) as u8;
@@ -468,6 +468,24 @@ fn binary(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
         TokenType::Slash => compiler.emit_op(OpCode::Divide),
         _ => panic!("Unhandled binary token: {:?}", token_type),
     }
+    Ok(())
+}
+
+fn logic_and(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let jump = emit_jump(compiler, OpCode::JumpIfFalse);
+    compiler.emit_op(OpCode::Pop);
+    parse_precedence(compiler, PREC_AND)?;
+    patch_jump(compiler, jump);
+    Ok(())
+}
+
+fn logic_or(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let else_jump = emit_jump(compiler, OpCode::JumpIfFalse);
+    let end_jump = emit_jump(compiler, OpCode::Jump);
+    patch_jump(compiler, else_jump);
+    compiler.emit_op(OpCode::Pop);
+    parse_precedence(compiler, PREC_OR)?;
+    patch_jump(compiler, end_jump);
     Ok(())
 }
 
