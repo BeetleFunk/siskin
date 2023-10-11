@@ -213,6 +213,10 @@ fn execute(chunk: &Chunk, output: &mut dyn Write) -> BasicResult<()> {
                     ));
                 }
             }
+            OpCode::Loop => {
+                let offset = read_short(&mut state, chunk);
+                state.ip -= offset as usize;
+            }
         }
     }
 

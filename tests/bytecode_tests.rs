@@ -215,3 +215,24 @@ fn logical_or() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn while_loop() -> TestResult {
+    let code = "\
+        while (99 + 77 <= 1) {
+            print \"impossible\";
+        }
+        
+        var a = 0;
+        while (a < 5) {
+            print a;
+            a = a + 1;
+        }";
+
+        let output = run(code)?;
+        let expected = "0\n1\n2\n3\n4\n";
+    
+        assert_eq!(expected, output);
+
+    Ok(())
+}

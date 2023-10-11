@@ -26,9 +26,10 @@ pub enum OpCode {
     SetLocal,
     Jump,
     JumpIfFalse,
+    Loop,
 }
 
-const OP_TABLE: [OpCode; 23] = [
+const OP_TABLE: [OpCode; 24] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -52,6 +53,7 @@ const OP_TABLE: [OpCode; 23] = [
     OpCode::SetLocal,
     OpCode::Jump,
     OpCode::JumpIfFalse,
+    OpCode::Loop,
 ];
 
 impl From<u8> for OpCode {
@@ -178,6 +180,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::SetLocal => byte_instruction("SetLocal", chunk, offset),
         OpCode::Jump => short_instruction("Jump", chunk, offset),
         OpCode::JumpIfFalse => short_instruction("JumpIfFalse", chunk, offset),
+        OpCode::Loop => short_instruction("Loop", chunk, offset),
     }
 }
 

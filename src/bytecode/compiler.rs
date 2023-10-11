@@ -278,6 +278,8 @@ fn statement(compiler: &mut Compiler) -> UnitResult {
         result
     } else if compiler.advance_if_match(TokenType::If)? {
         if_statement(compiler)
+    } else if compiler.advance_if_match(TokenType::While)? {
+        while_statement(compiler)
     } else if compiler.advance_if_match(TokenType::Print)? {
         print_statement(compiler)
     } else {
@@ -309,6 +311,7 @@ fn if_statement(compiler: &mut Compiler) -> UnitResult {
     compiler.emit_op(OpCode::Pop);
     statement(compiler)?;
     let jump_over_else = emit_jump(compiler, OpCode::Jump);
+
     patch_jump(compiler, jump_over_then);
 
     // setup else branch
@@ -316,17 +319,39 @@ fn if_statement(compiler: &mut Compiler) -> UnitResult {
     if compiler.advance_if_match(TokenType::Else)? {
         statement(compiler)?;
     }
+
     patch_jump(compiler, jump_over_else);
 
     Ok(())
 }
 
+fn while_statement(compiler: &mut Compiler) -> UnitResult {
+    let loop_start = compiler.chunk.code.len();
+
+    compiler.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
+    expression(compiler)?;
+    compiler.consume(TokenType::RightParen, "Expect ')' after condition.")?;
+
+    let exit_jump = emit_jump(compiler, OpCode::JumpIfFalse);
+    compiler.emit_op(OpCode::Pop);
+    statement(compiler)?;
+
+    emit_loop(compiler, loop_start);
+
+    patch_jump(compiler, exit_jump);
+    compiler.emit_op(OpCode::Pop);
+
+    Ok(())
+}
+
+// emit jump instruction with dummy data for the jump distance, returns the jump offset for later patching
 fn emit_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
     compiler.emit_op(opcode);
     compiler.emit_data(0xff, 0xff);
     compiler.chunk.code.len() - 2
 }
 
+// patch the jump data at the given offset with the distance to the current instruction
 fn patch_jump(compiler: &mut Compiler, offset: usize) {
     let jump_distance = compiler.chunk.code.len() - offset - 2;
     if jump_distance > (u16::MAX as usize) {
@@ -334,6 +359,16 @@ fn patch_jump(compiler: &mut Compiler, offset: usize) {
     }
     compiler.chunk.code[offset] = (jump_distance >> 8) as u8;
     compiler.chunk.code[offset + 1] = jump_distance as u8;
+}
+
+// emit loop instruction with the jump distance computed back to the loop_start location
+fn emit_loop(compiler: &mut Compiler, loop_start: usize) {
+    compiler.emit_op(OpCode::Loop);
+    let jump_distance = compiler.chunk.code.len() - loop_start + 2;
+    if jump_distance > (u16::MAX as usize) {
+        panic!("Loop body too large.");
+    }
+    compiler.emit_data((jump_distance >> 8) as u8, jump_distance as u8);
 }
 
 fn print_statement(compiler: &mut Compiler) -> UnitResult {
