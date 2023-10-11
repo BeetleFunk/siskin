@@ -236,3 +236,36 @@ fn while_loop() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn for_loop() -> TestResult {
+    let code = "\
+        var i = 2;
+        for (; i<5; ) {
+            print i;
+            i = i + 1;
+        }
+
+        for (i=999; false; ) {
+            print \"impossible\";
+        }
+        print i;
+
+        {
+            for (var j = 0; j<5;) {
+                print j;
+                j = j + 2;
+            }
+        }
+
+        for (var i=0; i<5; i = i + 1) {
+            print i;
+        }";
+
+        let output = run(code)?;
+        let expected = "2\n3\n4\n999\n0\n2\n4\n0\n1\n2\n3\n4\n";
+    
+        assert_eq!(expected, output);
+
+    Ok(())
+}

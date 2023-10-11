@@ -280,6 +280,8 @@ fn statement(compiler: &mut Compiler) -> UnitResult {
         if_statement(compiler)
     } else if compiler.advance_if_match(TokenType::While)? {
         while_statement(compiler)
+    } else if compiler.advance_if_match(TokenType::For)? {
+        for_statement(compiler)
     } else if compiler.advance_if_match(TokenType::Print)? {
         print_statement(compiler)
     } else {
@@ -344,7 +346,62 @@ fn while_statement(compiler: &mut Compiler) -> UnitResult {
     Ok(())
 }
 
-// emit jump instruction with dummy data for the jump distance, returns the jump offset for later patching
+fn for_statement(compiler: &mut Compiler) -> UnitResult {
+    compiler.begin_scope();
+    compiler.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
+
+    // compile the optional initializer
+    if compiler.advance_if_match(TokenType::Semicolon)? {
+        // no initializer
+    } else if compiler.advance_if_match(TokenType::Var)? {
+        var_declaration(compiler)?;
+    } else {
+        expression_statement(compiler)?;
+    }
+
+    let condition_start = compiler.chunk.code.len();
+
+    // compile the optional condition
+    let exit_jump = if compiler.advance_if_match(TokenType::Semicolon)? {
+        None
+    } else {
+        expression(compiler)?;
+        compiler.consume(TokenType::Semicolon, "Expect ';' after loop condition.")?;
+        let exit_jump = emit_jump(compiler, OpCode::JumpIfFalse);
+        compiler.emit_op(OpCode::Pop);
+        Some(exit_jump)
+    };
+
+    // compile the optional increment - this determines the start location for the loop instruction at the end of the body
+    let loop_start = if compiler.advance_if_match(TokenType::RightParen)? {
+        // no increment expression, so leave the loop start at the condition check
+        condition_start
+    } else {
+        let body_jump = emit_jump(compiler, OpCode::Jump);
+        let increment_start = compiler.chunk.code.len();
+        expression(compiler)?;
+        compiler.emit_op(OpCode::Pop);
+        compiler.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
+        emit_loop(compiler, condition_start);
+        patch_jump(compiler, body_jump);
+        increment_start
+    };
+
+    // compile the loop body
+    statement(compiler)?;
+    emit_loop(compiler, loop_start);
+
+    if let Some(exit_jump) = exit_jump {
+        patch_jump(compiler, exit_jump);
+        compiler.emit_op(OpCode::Pop);
+    }
+
+    compiler.end_scope();
+
+    Ok(())
+}
+
+// emit jump instruction with dummy data for the jump distance, returns the location of the jump for later patching
 fn emit_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
     compiler.emit_op(opcode);
     compiler.emit_data(0xff, 0xff);
