@@ -4,7 +4,7 @@ use std::result;
 use crate::error::{BasicError, BasicResult};
 use crate::scanner::{Scanner, Token, TokenType};
 
-use super::code::{self, Chunk, OpCode, Value};
+use super::code::{self, Chunk, Function, OpCode, Value};
 
 type UnitResult = BasicResult<()>;
 
@@ -37,6 +37,121 @@ impl Parser {
         let replaced = mem::replace(&mut self.current, self.scanner.next_token()?);
         self.previous = replaced;
         Ok(&self.current)
+    }
+}
+
+struct Compiler {
+    parser: Parser,
+    func_stack: Vec<Function>,
+    locals: Vec<Local>,
+    scope_depth: u32,
+}
+
+struct Local {
+    name: Token,
+    depth: u32,
+}
+
+impl Compiler {
+    fn new(parser: Parser) -> Compiler {
+        // toplevel bytecode for a script will end up in this root function
+        let root_func = Function { arity: 0, chunk: Chunk::new(), name: "".to_string() };
+        Compiler {
+            parser,
+            func_stack: vec![root_func],
+            locals: Vec::new(),
+            scope_depth: 0,
+        }
+    }
+
+    fn chunk(&self) -> &Chunk {
+        &self.func_stack.last().unwrap().chunk
+    }
+
+    fn chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.func_stack.last_mut().unwrap().chunk
+    }
+
+    fn emit_op(&mut self, byte: OpCode) {
+        let line = self.parser.previous.line;
+        self.chunk_mut().write_op(byte, line);
+    }
+
+    fn emit_ops(&mut self, byte1: OpCode, byte2: OpCode) {
+        let line = self.parser.previous.line;
+        self.chunk_mut().write_op(byte1, line);
+        self.chunk_mut().write_op(byte2, line);
+    }
+
+    fn emit_data_op(&mut self, byte1: OpCode, byte2: u8) {
+        let line = self.parser.previous.line;
+        self.chunk_mut().write_op(byte1, line);
+        self.chunk_mut().write(byte2, line);
+    }
+
+    fn emit_data(&mut self, byte1: u8, byte2: u8) {
+        let line = self.parser.previous.line;
+        self.chunk_mut().write(byte1, line);
+        self.chunk_mut().write(byte2, line);
+    }
+
+    fn advance_if_match(&mut self, token_type: TokenType) -> Result<bool, BasicError> {
+        if self.parser.current.token_type == token_type {
+            self.parser.advance()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn consume(&mut self, expected: TokenType, error_msg: &str) -> UnitResult {
+        if self.advance_if_match(expected)? {
+            Ok(())
+        } else {
+            Err(build_error(error_msg, self.parser.current.line))
+        }
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+
+        while let Some(last) = self.locals.last() {
+            if last.depth > self.scope_depth {
+                self.locals.pop();
+                self.emit_op(OpCode::Pop);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn add_local(&mut self, name: Token) {
+        if self.locals.len() >= u8::MAX.into() {
+            panic!("Locals in scope limited to 256 entries at the moment.");
+        }
+
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+        })
+    }
+
+    fn compute_local_index(&self, name: &str) -> Option<u8> {
+        if let Some((match_index, _)) = self
+            .locals
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|entry| entry.1.name.lexeme == name)
+        {
+            Some(match_index as u8)
+        } else {
+            None
+        }
     }
 }
 
@@ -105,14 +220,9 @@ fn get_rule(token_type: TokenType) -> &'static ParseRule {
     &PARSE_TABLE[token_type as usize].1
 }
 
-pub fn compile(source: &str) -> result::Result<Chunk, BasicError> {
-    let scanner = Scanner::new(source);
-    let parser = Parser::new(scanner)?;
-
-    let chunk = Chunk::new();
-
-    // TBD: Should compiler own these or not?
-    let mut compiler = Compiler::new(parser, chunk);
+pub fn compile(source: &str) -> result::Result<Function, BasicError> {
+    let parser = Parser::new(Scanner::new(source))?;
+    let mut compiler = Compiler::new(parser);
 
     while compiler.parser.current.token_type != TokenType::Eof {
         declaration(&mut compiler)?;
@@ -121,111 +231,10 @@ pub fn compile(source: &str) -> result::Result<Chunk, BasicError> {
     compiler.emit_op(OpCode::Return);
 
     if DEBUG_DUMP_CHUNK {
-        code::disassemble_chunk(&compiler.chunk, "name");
+        code::disassemble_chunk(&compiler.func_stack[0].chunk, "name");
     }
 
-    Ok(compiler.chunk)
-}
-
-struct Compiler {
-    parser: Parser,
-    chunk: Chunk,
-    locals: Vec<Local>,
-    scope_depth: u32,
-}
-
-struct Local {
-    name: Token,
-    depth: u32,
-}
-
-impl Compiler {
-    fn new(parser: Parser, chunk: Chunk) -> Compiler {
-        Compiler {
-            parser,
-            chunk,
-            locals: Vec::new(),
-            scope_depth: 0,
-        }
-    }
-
-    fn emit_op(&mut self, byte: OpCode) {
-        self.chunk.write_op(byte, self.parser.previous.line);
-    }
-
-    fn emit_ops(&mut self, byte1: OpCode, byte2: OpCode) {
-        self.chunk.write_op(byte1, self.parser.previous.line);
-        self.chunk.write_op(byte2, self.parser.previous.line);
-    }
-
-    fn emit_data_op(&mut self, byte1: OpCode, byte2: u8) {
-        self.chunk.write_op(byte1, self.parser.previous.line);
-        self.chunk.write(byte2, self.parser.previous.line);
-    }
-
-    fn emit_data(&mut self, byte1: u8, byte2: u8) {
-        self.chunk.write(byte1, self.parser.previous.line);
-        self.chunk.write(byte2, self.parser.previous.line);
-    }
-
-    fn advance_if_match(&mut self, token_type: TokenType) -> Result<bool, BasicError> {
-        if self.parser.current.token_type == token_type {
-            self.parser.advance()?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn consume(&mut self, expected: TokenType, error_msg: &str) -> UnitResult {
-        if self.advance_if_match(expected)? {
-            Ok(())
-        } else {
-            Err(build_error(error_msg, self.parser.current.line))
-        }
-    }
-
-    fn begin_scope(&mut self) {
-        self.scope_depth += 1;
-    }
-
-    fn end_scope(&mut self) {
-        self.scope_depth -= 1;
-
-        while let Some(last) = self.locals.last() {
-            if last.depth > self.scope_depth {
-                self.locals.pop();
-                self.emit_op(OpCode::Pop);
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn add_local(&mut self, name: Token) {
-        if self.locals.len() >= u8::MAX.into() {
-            panic!("Locals in scope limited to 256 entries at the moment.");
-        }
-
-        self.locals.push(Local {
-            name,
-            depth: self.scope_depth,
-        })
-    }
-
-    fn compute_local_index(&self, name: &str) -> Option<u8> {
-        if let Some((match_index, _)) = self
-            .locals
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|entry| entry.1.name.lexeme == name)
-        {
-            Some(match_index as u8)
-        } else {
-            None
-        }
-    }
+    Ok(compiler.func_stack.remove(0))
 }
 
 fn declaration(compiler: &mut Compiler) -> UnitResult {
@@ -255,7 +264,7 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
     if compiler.scope_depth == 0 {
         // for global vars, save the variable name as a string in the constant table
         let index = compiler
-            .chunk
+            .chunk_mut()
             .add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
         define_global(compiler, index);
     } else {
@@ -328,7 +337,7 @@ fn if_statement(compiler: &mut Compiler) -> UnitResult {
 }
 
 fn while_statement(compiler: &mut Compiler) -> UnitResult {
-    let loop_start = compiler.chunk.code.len();
+    let loop_start = compiler.chunk().code.len();
 
     compiler.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
     expression(compiler)?;
@@ -359,7 +368,7 @@ fn for_statement(compiler: &mut Compiler) -> UnitResult {
         expression_statement(compiler)?;
     }
 
-    let condition_start = compiler.chunk.code.len();
+    let condition_start = compiler.chunk().code.len();
 
     // compile the optional condition
     let exit_jump = if compiler.advance_if_match(TokenType::Semicolon)? {
@@ -378,7 +387,7 @@ fn for_statement(compiler: &mut Compiler) -> UnitResult {
         condition_start
     } else {
         let body_jump = emit_jump(compiler, OpCode::Jump);
-        let increment_start = compiler.chunk.code.len();
+        let increment_start = compiler.chunk().code.len();
         expression(compiler)?;
         compiler.emit_op(OpCode::Pop);
         compiler.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
@@ -405,23 +414,23 @@ fn for_statement(compiler: &mut Compiler) -> UnitResult {
 fn emit_jump(compiler: &mut Compiler, opcode: OpCode) -> usize {
     compiler.emit_op(opcode);
     compiler.emit_data(0xff, 0xff);
-    compiler.chunk.code.len() - 2
+    compiler.chunk().code.len() - 2
 }
 
 // patch the jump data at the given offset with the distance to the current instruction
 fn patch_jump(compiler: &mut Compiler, offset: usize) {
-    let jump_distance = compiler.chunk.code.len() - offset - 2;
+    let jump_distance = compiler.chunk().code.len() - offset - 2;
     if jump_distance > (u16::MAX as usize) {
         panic!("Exceeded maximum jump size.");
     }
-    compiler.chunk.code[offset] = (jump_distance >> 8) as u8;
-    compiler.chunk.code[offset + 1] = jump_distance as u8;
+    compiler.chunk_mut().code[offset] = (jump_distance >> 8) as u8;
+    compiler.chunk_mut().code[offset + 1] = jump_distance as u8;
 }
 
 // emit loop instruction with the jump distance computed back to the loop_start location
 fn emit_loop(compiler: &mut Compiler, loop_start: usize) {
     compiler.emit_op(OpCode::Loop);
-    let jump_distance = compiler.chunk.code.len() - loop_start + 2;
+    let jump_distance = compiler.chunk().code.len() - loop_start + 2;
     if jump_distance > (u16::MAX as usize) {
         panic!("Loop body too large.");
     }
@@ -474,17 +483,19 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
 }
 
 fn string(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let value = compiler.parser.previous.extract_string().clone().into();
     let address = compiler
-        .chunk
-        .add_constant(compiler.parser.previous.extract_string().to_owned().into());
+        .chunk_mut()
+        .add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
 fn number(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let value = compiler.parser.previous.extract_number().into();
     let address = compiler
-        .chunk
-        .add_constant(compiler.parser.previous.extract_number().into());
+        .chunk_mut()
+        .add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
@@ -511,8 +522,9 @@ fn variable(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
         index = local_index;
         (OpCode::SetLocal, OpCode::GetLocal)
     } else {
+        let name = name.clone();
         // save the global variable name as a string in the constant table
-        index = compiler.chunk.add_constant(Value::from(name.clone()));
+        index = compiler.chunk_mut().add_constant(Value::from(name));
         (OpCode::SetGlobal, OpCode::GetGlobal)
     };
     // determine whether loading value from or storing value into the variable

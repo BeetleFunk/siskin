@@ -68,6 +68,7 @@ pub enum Value {
     Nil,
     Number(f64),
     String(String),
+    Function(Box<Function>)
 }
 
 impl fmt::Display for Value {
@@ -80,6 +81,7 @@ impl fmt::Display for Value {
                 Self::Nil => "Nil".to_string(),
                 Self::Number(value) => value.to_string(),
                 Self::String(value) => value.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
+                Self::Function(value) => value.name.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
             }
         )
     }
@@ -103,6 +105,7 @@ impl From<String> for Value {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub values: Vec<Value>,
@@ -135,6 +138,13 @@ impl Chunk {
         self.code.push(byte);
         self.line_numbers.push(line);
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Function {
+    pub arity: u32,
+    pub chunk: Chunk,
+    pub name: String,
 }
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
