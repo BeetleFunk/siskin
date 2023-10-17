@@ -42,9 +42,14 @@ impl Parser {
 
 struct Compiler {
     parser: Parser,
-    func_stack: Vec<Function>,
+    func_stack: Vec<CompilerFunction>,
     locals: Vec<Local>,
     scope_depth: u32,
+}
+
+struct CompilerFunction {
+    func: Function,
+    locals_offset: usize,
 }
 
 struct Local {
@@ -55,21 +60,28 @@ struct Local {
 impl Compiler {
     fn new(parser: Parser) -> Compiler {
         // toplevel bytecode for a script will end up in this root function
-        let root_func = Function { arity: 0, chunk: Chunk::new(), name: "".to_string() };
+        let root_func = Function {
+            arity: 0,
+            chunk: Chunk::new(),
+            name: "".to_string(),
+        };
         Compiler {
             parser,
-            func_stack: vec![root_func],
+            func_stack: vec![CompilerFunction {
+                func: root_func,
+                locals_offset: 0,
+            }],
             locals: Vec::new(),
             scope_depth: 0,
         }
     }
 
     fn chunk(&self) -> &Chunk {
-        &self.func_stack.last().unwrap().chunk
+        &self.func_stack.last().unwrap().func.chunk
     }
 
     fn chunk_mut(&mut self) -> &mut Chunk {
-        &mut self.func_stack.last_mut().unwrap().chunk
+        &mut self.func_stack.last_mut().unwrap().func.chunk
     }
 
     fn emit_op(&mut self, byte: OpCode) {
@@ -104,9 +116,9 @@ impl Compiler {
         }
     }
 
-    fn consume(&mut self, expected: TokenType, error_msg: &str) -> UnitResult {
+    fn consume(&mut self, expected: TokenType, error_msg: &str) -> Result<&Token, BasicError> {
         if self.advance_if_match(expected)? {
-            Ok(())
+            Ok(&self.parser.previous)
         } else {
             Err(build_error(error_msg, self.parser.current.line))
         }
@@ -130,6 +142,8 @@ impl Compiler {
     }
 
     fn add_local(&mut self, name: Token) {
+        println!("Adding local {}", name.lexeme);
+
         if self.locals.len() >= u8::MAX.into() {
             panic!("Locals in scope limited to 256 entries at the moment.");
         }
@@ -141,8 +155,9 @@ impl Compiler {
     }
 
     fn compute_local_index(&self, name: &str) -> Option<u8> {
-        if let Some((match_index, _)) = self
-            .locals
+        let base_offset = self.func_stack.last().unwrap().locals_offset;
+        let available = &self.locals[base_offset..self.locals.len()];
+        if let Some((match_index, _)) = available
             .iter()
             .enumerate()
             .rev()
@@ -152,6 +167,18 @@ impl Compiler {
         } else {
             None
         }
+    }
+
+    fn identifier_in_current_scope(&self, name: &str) -> bool {
+        for local in self.locals.iter().rev() {
+            // locals are always added in order of scope depth, so we can bail as soon as we hit one at a lower depth
+            if local.depth != self.scope_depth {
+                return false;
+            } else if local.name.lexeme == name {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -165,7 +192,7 @@ const PREC_COMPARISON: u32 = 5; // < > <= >=
 const PREC_TERM: u32 = 6; // + -
 const PREC_FACTOR: u32 = 7; // * /
 const PREC_UNARY: u32 = 8; // ! -
-                           //const PREC_CALL: u32 = 9; // . ()
+const PREC_CALL: u32 = 9; // . ()
 
 struct ParseRule {
     prefix: Option<fn(&mut Compiler, bool) -> UnitResult>,
@@ -176,7 +203,7 @@ struct ParseRule {
 // Each entry includes corresponding TokenType either for index sorting or for sanity checking if table is used directly
 #[rustfmt::skip]
 const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
-    (TokenType::LeftParen,      ParseRule { prefix: Some(grouping), infix: None,            precedence: PREC_NONE }),
+    (TokenType::LeftParen,      ParseRule { prefix: Some(grouping), infix: Some(call),            precedence: PREC_CALL }),
     (TokenType::RightParen,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::LeftBrace,      ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }), 
     (TokenType::RightBrace,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -228,26 +255,29 @@ pub fn compile(source: &str) -> result::Result<Function, BasicError> {
         declaration(&mut compiler)?;
     }
 
-    compiler.emit_op(OpCode::Return);
+    emit_empty_return(&mut compiler);
 
     if DEBUG_DUMP_CHUNK {
-        code::disassemble_chunk(&compiler.func_stack[0].chunk, "name");
+        code::disassemble_chunk(&compiler.func_stack[0].func.chunk, "name");
     }
 
-    Ok(compiler.func_stack.remove(0))
+    Ok(compiler.func_stack.remove(0).func)
 }
 
 fn declaration(compiler: &mut Compiler) -> UnitResult {
     if compiler.advance_if_match(TokenType::Var)? {
         var_declaration(compiler)
+    } else if compiler.advance_if_match(TokenType::Fun)? {
+        fun_declaration(compiler)
     } else {
         statement(compiler)
     }
 }
 
 fn var_declaration(compiler: &mut Compiler) -> UnitResult {
-    compiler.consume(TokenType::Identifier, "Expect variable name.")?;
-    let identifier = compiler.parser.previous.clone();
+    let identifier = compiler
+        .consume(TokenType::Identifier, "Expect variable name.")?
+        .clone();
 
     // compile the expression before adding the local variable entry, this makes variable shadowing work properly
     if compiler.advance_if_match(TokenType::Equal)? {
@@ -275,6 +305,121 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
     Ok(())
 }
 
+fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
+    let identifier = compiler
+        .consume(TokenType::Identifier, "Expect function name.")?
+        .clone();
+    let name = identifier.extract_name();
+    let locals_offset = compiler.locals.len();
+
+    if compiler.scope_depth == 0 {
+        // for global scope, add a temporary empty entry to compiler locals to get the proper offset into the value stack
+        // at runtime the function value being called will always be in stack slot zero (relative to the function call frame)
+        let mut dummy_entry = identifier.clone();
+        dummy_entry.lexeme = "".to_string();
+        compiler.add_local(dummy_entry);
+    } else {
+        // for non-global scope, add the function to locals before proceeding to facilitate recursion
+        // unlike variables, functions are not allowed to shadow existing names
+        if compiler.identifier_in_current_scope(name) {
+            build_error(
+                &format!(
+                    "Already a variable in scope matching the function name ({}).",
+                    name
+                ),
+                identifier.line,
+            );
+        }
+        compiler.add_local(identifier.clone());
+    }
+
+    function(compiler, name.clone(), locals_offset)?;
+
+    if compiler.scope_depth == 0 {
+        // if in global scope, the temporary entry in locals must be popped off after compiling the function (see above)
+        let dummy_entry = compiler.locals.pop().unwrap();
+        if !dummy_entry.name.lexeme.is_empty() {
+            // if we are popping a non-temporary local then something very bad has happened, function helper should have cleaned up
+            panic!("Expected temporary value on the compiler local stack after compilation");
+        }
+
+        let index = compiler.chunk_mut().add_constant(Value::from(name.clone())); // TODO: how to avoid the clone here?
+        define_global(compiler, index)
+    }
+
+    Ok(())
+}
+
+fn function(compiler: &mut Compiler, name: String, locals_offset: usize) -> UnitResult {
+    compiler.begin_scope();
+
+    compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
+
+    let arity = function_parameters(compiler)?;
+    compiler.func_stack.push(CompilerFunction {
+        func: Function {
+            arity,
+            chunk: Chunk::new(),
+            name,
+        },
+        locals_offset,
+    });
+
+    compiler.consume(
+        TokenType::RightParen,
+        "Expect ')' after function parameters.",
+    )?;
+    compiler.consume(TokenType::LeftBrace, "Expect '{' before function body.")?;
+
+    block(compiler)?;
+    emit_empty_return(compiler);
+
+    compiler.end_scope();
+
+    // pop the function that was just compiled and add it as a constant to the chunk of the parent function
+    let func_value = compiler.func_stack.pop().unwrap().func.into();
+    let index = compiler.chunk_mut().add_constant(func_value);
+    compiler.emit_data_op(OpCode::Constant, index);
+
+    Ok(())
+}
+
+fn emit_empty_return(compiler: &mut Compiler) {
+    compiler.emit_op(OpCode::Nil);
+    compiler.emit_op(OpCode::Return);
+}
+
+// consume parameter list and add each name to the current locals, doesn't emit any bytecode
+fn function_parameters(compiler: &mut Compiler) -> BasicResult<u8> {
+    if compiler.parser.current.token_type == TokenType::RightParen {
+        Ok(0)
+    } else {
+        let mut arity = 0;
+        loop {
+            let identifier = compiler
+                .consume(TokenType::Identifier, "Expect parameter name.")?
+                .clone();
+            // prevent duplicate parameter names on a function
+            if compiler.identifier_in_current_scope(&identifier.lexeme) {
+                return Err(build_error(
+                    &format!("Duplicate parameter name ({}).", &identifier.lexeme),
+                    identifier.line,
+                ));
+            } else if arity == u8::MAX {
+                return Err(build_error(
+                    "Function parameter list cannot exceed 255 entries",
+                    identifier.line,
+                ));
+            }
+            compiler.add_local(identifier);
+            arity += 1;
+            if !compiler.advance_if_match(TokenType::Comma)? {
+                return Ok(arity);
+            }
+        }
+    }
+}
+
 fn define_global(compiler: &mut Compiler, index: u8) {
     compiler.emit_data_op(OpCode::DefineGlobal, index);
 }
@@ -287,6 +432,8 @@ fn statement(compiler: &mut Compiler) -> UnitResult {
         result
     } else if compiler.advance_if_match(TokenType::If)? {
         if_statement(compiler)
+    } else if compiler.advance_if_match(TokenType::Return)? {
+        return_statement(compiler)
     } else if compiler.advance_if_match(TokenType::While)? {
         while_statement(compiler)
     } else if compiler.advance_if_match(TokenType::For)? {
@@ -333,6 +480,17 @@ fn if_statement(compiler: &mut Compiler) -> UnitResult {
 
     patch_jump(compiler, jump_over_else);
 
+    Ok(())
+}
+
+fn return_statement(compiler: &mut Compiler) -> UnitResult {
+    if compiler.advance_if_match(TokenType::Semicolon)? {
+        emit_empty_return(compiler);
+    } else {
+        expression(compiler)?;
+        compiler.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
+        compiler.emit_op(OpCode::Return);
+    }
     Ok(())
 }
 
@@ -471,7 +629,7 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
         infix_rule(compiler, can_assign)?;
     }
 
-    // detected assignment but the target expression didn't consume the equal token, improve the error message for this invalid formation
+    // detected assignment but the target expression didn't consume the equal token, improve the error message for this invalid assignment
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
         return Err(build_error(
             "Invalid assignment target.",
@@ -484,18 +642,14 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
 
 fn string(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     let value = compiler.parser.previous.extract_string().clone().into();
-    let address = compiler
-        .chunk_mut()
-        .add_constant(value);
+    let address = compiler.chunk_mut().add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
 fn number(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     let value = compiler.parser.previous.extract_number().into();
-    let address = compiler
-        .chunk_mut()
-        .add_constant(value);
+    let address = compiler.chunk_mut().add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
@@ -541,6 +695,33 @@ fn grouping(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     expression(compiler)?;
     compiler.consume(TokenType::RightParen, "Expect ')' after expression.")?;
     Ok(())
+}
+
+fn call(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    let arg_count = argument_list(compiler)?;
+    compiler.emit_data_op(OpCode::Call, arg_count);
+    Ok(())
+}
+
+fn argument_list(compiler: &mut Compiler) -> BasicResult<u8> {
+    let mut arg_count = 0;
+    if compiler.parser.current.token_type != TokenType::RightParen {
+        loop {
+            expression(compiler)?;
+            if arg_count == 255 {
+                return Err(build_error(
+                    "Can't have more than 255 arguments",
+                    compiler.parser.previous.line,
+                ));
+            }
+            arg_count += 1;
+            if !compiler.advance_if_match(TokenType::Comma)? {
+                break;
+            }
+        }
+    }
+    compiler.consume(TokenType::RightParen, "Expect ')' after arguments.")?;
+    Ok(arg_count)
 }
 
 fn unary(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {

@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::rc::Rc;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, OpCode, Value, Function};
+use super::code::{self, Function, OpCode, Value};
 use super::compiler;
 
 static DEBUG_TRACING: bool = true;
+
+static FRAMES_MAX: usize = 256;
 
 struct State {
     //ip: usize,
     locals: Vec<Value>,
     globals: HashMap<String, Value>,
-    call_stack: Vec<CallFrame>
+    call_stack: Vec<CallFrame>,
 }
 
 impl State {
@@ -38,12 +41,16 @@ impl State {
 struct CallFrame {
     ip: usize,
     locals_base: usize, // base index for function locals within the VM locals stack
-    function: Function,
+    function: Rc<Function>,
 }
 
 pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
     let root_func = compiler::compile(source)?;
-    let vm_state = State::new(CallFrame{ ip: 0, locals_base: 0, function: root_func });
+    let vm_state = State::new(CallFrame {
+        ip: 0,
+        locals_base: 0,
+        function: Rc::new(root_func),
+    });
     execute(vm_state, output)
 }
 
@@ -58,9 +65,20 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
         let opcode: OpCode = read_byte(&mut state).into();
         match opcode {
             OpCode::Return => {
-                if state.call_stack.len() == 1 {
+                let result = state.locals.pop().unwrap();
+                let previous_frame = state.call_stack.pop().unwrap();
+                if state.call_stack.is_empty() {
+                    // hit the end of the root function (script toplevel)
                     break;
                 }
+
+                // pop all locals left by the previous frame as well as the callee itself
+                let start = previous_frame.locals_base;
+                let end = state.locals.len();
+                state.locals.drain(start..end); //.for_each(|value| println!("Dropping {value}"));
+
+                // leave the result on top of the stack
+                state.locals.push(result);
             }
             OpCode::Constant => {
                 let value = read_constant(&mut state);
@@ -207,11 +225,13 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::GetLocal => {
                 let slot = read_byte(&mut state);
-                state.locals.push(state.locals[slot as usize].clone());
+                let local_index = state.frame().locals_base + (slot as usize);
+                state.locals.push(state.locals[local_index].clone());
             }
             OpCode::SetLocal => {
                 let slot = read_byte(&mut state);
-                state.locals[slot as usize] = state.locals.last().unwrap().clone();
+                let local_index = state.frame().locals_base + (slot as usize);
+                state.locals[local_index] = state.locals.last().unwrap().clone();
             }
             OpCode::Jump => {
                 let offset = read_short(&mut state);
@@ -233,6 +253,12 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Loop => {
                 let offset = read_short(&mut state);
                 state.frame_mut().ip -= offset as usize;
+            }
+            OpCode::Call => {
+                let arg_count = read_byte(&mut state);
+                // cloning values should be cheap (functions use Rc)
+                let callee: Value = state.locals[state.locals.len() - 1 - (arg_count as usize)].clone();
+                call_value(&mut state, callee, arg_count)?;
             }
         }
     }
@@ -267,6 +293,27 @@ fn pop_binary_operands(stack: &mut Vec<Value>) -> (Value, Value) {
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
     (a, b)
+}
+
+fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()> {
+    if state.call_stack.len() >= FRAMES_MAX {
+        return Err(build_error("Stack overflow.", last_line_number(state)))
+    }
+
+    match callee {
+        Value::Function(function) => {
+            if function.arity != arg_count {
+                return Err(build_error(&format!("Expected {} arguments but received {}.", function.arity, arg_count), last_line_number(state)))
+            }
+
+            // this should point to the location of the callee on the stack, arguments will begin in slot 1 relative to this base pointer
+            let locals_base = state.locals.len() - (arg_count as usize) - 1;
+
+            state.call_stack.push(CallFrame { ip: 0, locals_base, function })
+        }
+        _ => return Err(build_error("Can only call functions and classes.", last_line_number(state))),
+    }
+    Ok(())
 }
 
 fn print_stack(stack: &Vec<Value>) {

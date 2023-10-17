@@ -123,11 +123,11 @@ fn if_statement() -> TestResult {
             print \"second true\";
         }";
 
-        let output = run(code)?;
-        let expected = "\
+    let output = run(code)?;
+    let expected = "\
             first true\n";
-    
-        assert_eq!(expected, output);
+
+    assert_eq!(expected, output);
 
     Ok(())
 }
@@ -155,11 +155,11 @@ fn if_else_statement() -> TestResult {
             print \"hit final else\";
         }";
 
-        let output = run(code)?;
-        let expected = "\
+    let output = run(code)?;
+    let expected = "\
             hit then\nhit else if\nhit final else\n";
-    
-        assert_eq!(expected, output);
+
+    assert_eq!(expected, output);
 
     Ok(())
 }
@@ -179,10 +179,10 @@ fn logical_and() -> TestResult {
             print \"condition false\";
         }";
 
-        let output = run(code)?;
-        let expected = "condition false\ncondition true\n";
-    
-        assert_eq!(expected, output);
+    let output = run(code)?;
+    let expected = "condition false\ncondition true\n";
+
+    assert_eq!(expected, output);
 
     Ok(())
 }
@@ -208,10 +208,10 @@ fn logical_or() -> TestResult {
             print \"condition false\";
         }";
 
-        let output = run(code)?;
-        let expected = "condition true\ncondition true\ncondition false\n";
-    
-        assert_eq!(expected, output);
+    let output = run(code)?;
+    let expected = "condition true\ncondition true\ncondition false\n";
+
+    assert_eq!(expected, output);
 
     Ok(())
 }
@@ -229,10 +229,10 @@ fn while_loop() -> TestResult {
             a = a + 1;
         }";
 
-        let output = run(code)?;
-        let expected = "0\n1\n2\n3\n4\n";
-    
-        assert_eq!(expected, output);
+    let output = run(code)?;
+    let expected = "0\n1\n2\n3\n4\n";
+
+    assert_eq!(expected, output);
 
     Ok(())
 }
@@ -262,10 +262,107 @@ fn for_loop() -> TestResult {
             print i;
         }";
 
-        let output = run(code)?;
-        let expected = "2\n3\n4\n999\n0\n2\n4\n0\n1\n2\n3\n4\n";
-    
-        assert_eq!(expected, output);
+    let output = run(code)?;
+    let expected = "2\n3\n4\n999\n0\n2\n4\n0\n1\n2\n3\n4\n";
+
+    assert_eq!(expected, output);
 
     Ok(())
 }
+
+#[test]
+fn basic_functions() -> TestResult {
+    let code = "\
+        fun noArgs() {
+            print \"no args\";
+        }
+        noArgs();
+        
+        fun oneArg(arg1) {
+            print arg1;
+        }
+        var implicitReturnVal = oneArg(5);
+        print implicitReturnVal;
+        
+        {
+            var a = \"a\";
+
+            fun addTwoArgs(arg1, arg2) {
+                var sum = arg1 + arg2;
+                return sum;
+            }
+
+            var b = \"b\";
+
+            print addTwoArgs(21, 78);
+        }";
+
+    let output = run(code)?;
+    let expected = "no args\n5\nNil\n99\n";
+
+    assert_eq!(expected, output);
+
+    Ok(())
+}
+
+#[test]
+fn local_function_with_local_vars() -> TestResult {
+    let code = "\
+        {
+            var a = 1;
+            var b = 2;
+            fun display(value) {
+                print value;
+            }
+            a = b;
+            display(a);
+        }";
+
+    let output = run(code)?;
+    let expected = "2\n";
+
+    assert_eq!(expected, output);
+
+    Ok(())
+}
+
+#[test]
+fn recursion() -> TestResult {
+    let code = "\
+        fun incrementUntil5(value) {
+            print value;
+            if (value >= 5) {
+                return value;
+            } else {
+                value = value + 1;
+                return incrementUntil5(value);
+            }
+        }
+        var five = incrementUntil5(2);
+        {
+            print five;
+
+            fun decrementUntil10(value) {
+                print value;
+                if (value <= 10) {
+                    return value;
+                } else {
+                    var decremented = value - 1;
+                    return decrementUntil10(decremented);
+                }
+            }
+            var result1 = decrementUntil10(14);
+            var result2 = decrementUntil10(12);
+
+            print result1;
+            print result2;
+        }";
+
+    let output = run(code)?;
+    let expected = "2\n3\n4\n5\n5\n14\n13\n12\n11\n10\n12\n11\n10\n10\n10\n";
+
+    assert_eq!(expected, output);
+
+    Ok(())
+}
+

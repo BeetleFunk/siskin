@@ -1,5 +1,6 @@
 use core::panic;
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
@@ -27,9 +28,10 @@ pub enum OpCode {
     Jump,
     JumpIfFalse,
     Loop,
+    Call,
 }
 
-const OP_TABLE: [OpCode; 24] = [
+const OP_TABLE: [OpCode; 25] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -54,6 +56,7 @@ const OP_TABLE: [OpCode; 24] = [
     OpCode::Jump,
     OpCode::JumpIfFalse,
     OpCode::Loop,
+    OpCode::Call,
 ];
 
 impl From<u8> for OpCode {
@@ -68,7 +71,7 @@ pub enum Value {
     Nil,
     Number(f64),
     String(String),
-    Function(Box<Function>)
+    Function(Rc<Function>)
 }
 
 impl fmt::Display for Value {
@@ -102,6 +105,12 @@ impl From<f64> for Value {
 impl From<String> for Value {
     fn from(string: String) -> Value {
         Value::String(string)
+    }
+}
+
+impl From<Function> for Value {
+    fn from(func: Function) -> Value {
+        Value::Function(Rc::new(func))
     }
 }
 
@@ -142,7 +151,7 @@ impl Chunk {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
-    pub arity: u32,
+    pub arity: u8,
     pub chunk: Chunk,
     pub name: String,
 }
@@ -191,6 +200,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Jump => short_instruction("Jump", chunk, offset),
         OpCode::JumpIfFalse => short_instruction("JumpIfFalse", chunk, offset),
         OpCode::Loop => short_instruction("Loop", chunk, offset),
+        OpCode::Call => byte_instruction("Call", chunk, offset),
     }
 }
 
