@@ -366,3 +366,24 @@ fn recursion() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn native_function() -> TestResult {
+    let code = "\
+        print sqrt(64);
+
+        fun fib(n) {
+            if (n < 2) return n;
+            return fib(n - 2) + fib(n - 1);
+        }
+
+        var start = clock();
+        print fib(18);
+        print clock() - start;";
+
+    let output = run(code)?;
+
+    assert!(output.starts_with("8"));
+    assert!(output.contains("2584"));
+
+    Ok(())
+}

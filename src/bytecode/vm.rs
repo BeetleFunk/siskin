@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
+use std::time::Instant;
+
+use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Function, OpCode, Value};
+use super::code::{self, Function, NativeFunction, OpCode, Value};
 use super::compiler;
 
-static DEBUG_TRACING: bool = true;
+const DEBUG_TRACING: bool = false;
 
-static FRAMES_MAX: usize = 256;
+const FRAMES_MAX: usize = 256;
+
+// TODO: make this thread local and avoid requirement on sync?
+static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 
 struct State {
-    //ip: usize,
     locals: Vec<Value>,
     globals: HashMap<String, Value>,
     call_stack: Vec<CallFrame>,
@@ -22,7 +27,7 @@ impl State {
     pub fn new(root_frame: CallFrame) -> Self {
         State {
             locals: Vec::new(),
-            globals: HashMap::new(),
+            globals: create_globals(),
             call_stack: vec![root_frame],
         }
     }
@@ -38,6 +43,50 @@ impl State {
     }
 }
 
+fn create_globals() -> HashMap<String, Value> {
+    let mut globals = HashMap::new();
+
+    let library = [
+        NativeFunction {
+            arity: 0,
+            func: native_clock,
+            name: "clock".to_string(),
+        },
+        NativeFunction {
+            arity: 1,
+            func: native_sqrt,
+            name: "sqrt".to_string(),
+        },
+    ];
+
+    // add standard library native functions into the globals
+    for func in library {
+        globals.insert(func.name.clone(), Value::from(func));
+    }
+    globals
+}
+
+fn native_clock(_args: &[Value]) -> Value {
+    // make sure epoch is initialized first (lazy init)
+    let epoch = *EPOCH;
+    let duration = Instant::now() - epoch;
+    // lossy conversion to f64 here, shouldn't be an issue for a while though
+    (duration.as_millis() as f64).into()
+}
+
+fn native_sqrt(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        panic!("Native function invoked with incorrect arg count.");
+    }
+
+    if let Value::Number(value) = args[0] {
+        value.sqrt().into()
+    } else {
+        // TODO: runtime errors from native functions
+        panic!("Expected number argument in sqrt function.");
+    }
+}
+
 struct CallFrame {
     ip: usize,
     locals_base: usize, // base index for function locals within the VM locals stack
@@ -46,15 +95,34 @@ struct CallFrame {
 
 pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
     let root_func = compiler::compile(source)?;
-    let vm_state = State::new(CallFrame {
+    let mut vm_state = State::new(CallFrame {
         ip: 0,
         locals_base: 0,
         function: Rc::new(root_func),
     });
-    execute(vm_state, output)
+    let result = execute(&mut vm_state, output);
+
+    if let Err(ref e) = result {
+        writeln!(output, " --- {}", e.description).expect("Output writer should succeed.");
+        print_stack_trace(&vm_state, output);
+    }
+
+    result
 }
 
-fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
+fn print_stack_trace(state: &State, output: &mut dyn Write) {
+    for frame in state.call_stack.iter().rev() {
+        let line = frame.function.chunk.line_numbers[frame.ip - 1];
+        let name = if frame.function.name.is_empty() {
+            "script"
+        } else {
+            &frame.function.name
+        };
+        writeln!(output, " ---   line {line} in {name}").expect("Output writer should succeed.");
+    }
+}
+
+fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
     loop {
         if DEBUG_TRACING {
             print_stack(&state.locals);
@@ -62,7 +130,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
             code::disassemble_instruction(&frame.function.chunk, frame.ip);
         }
 
-        let opcode: OpCode = read_byte(&mut state).into();
+        let opcode: OpCode = read_byte(state).into();
         match opcode {
             OpCode::Return => {
                 let result = state.locals.pop().unwrap();
@@ -81,7 +149,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 state.locals.push(result);
             }
             OpCode::Constant => {
-                let value = read_constant(&mut state);
+                let value = read_constant(state);
                 state.locals.push(value);
             }
             OpCode::Negate => {
@@ -90,7 +158,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Negation requires numeric operand",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -100,7 +168,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Boolean inversion requires boolean operand",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -116,7 +184,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Comparison requires numeric operands",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -127,7 +195,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Comparison requires numeric operands",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -140,7 +208,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Addition requires either numeric or string operands",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -151,7 +219,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Subtraction requires numeric operands",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -162,7 +230,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Multiplication requires numeric operands",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -173,7 +241,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Division requires numeric operands",
-                        last_line_number(&state),
+                        last_line_number(state),
                     ));
                 }
             }
@@ -186,7 +254,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 state.locals.pop();
             }
             OpCode::DefineGlobal => {
-                if let Value::String(name) = read_constant(&mut state) {
+                if let Value::String(name) = read_constant(state) {
                     let value = state.locals.pop().unwrap();
                     state.globals.insert(name, value);
                 } else {
@@ -194,13 +262,13 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::GetGlobal => {
-                if let Value::String(name) = read_constant(&mut state) {
+                if let Value::String(name) = read_constant(state) {
                     if let Some(value) = state.globals.get(&name) {
                         state.locals.push(value.clone());
                     } else {
                         return Err(build_error(
                             &format!("Undefined variable {name}."),
-                            last_line_number(&state),
+                            last_line_number(state),
                         ));
                     }
                 } else {
@@ -208,7 +276,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::SetGlobal => {
-                if let Value::String(name) = read_constant(&mut state) {
+                if let Value::String(name) = read_constant(state) {
                     let entry = state.globals.entry(name);
                     if let std::collections::hash_map::Entry::Occupied(mut entry) = entry {
                         // avoid popping the value off the stack here, assignment result should be propagated
@@ -216,7 +284,7 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                     } else {
                         return Err(build_error(
                             &format!("Undefined variable {}.", entry.key()),
-                            last_line_number(&state),
+                            last_line_number(state),
                         ));
                     }
                 } else {
@@ -224,21 +292,21 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::GetLocal => {
-                let slot = read_byte(&mut state);
+                let slot = read_byte(state);
                 let local_index = state.frame().locals_base + (slot as usize);
                 state.locals.push(state.locals[local_index].clone());
             }
             OpCode::SetLocal => {
-                let slot = read_byte(&mut state);
+                let slot = read_byte(state);
                 let local_index = state.frame().locals_base + (slot as usize);
                 state.locals[local_index] = state.locals.last().unwrap().clone();
             }
             OpCode::Jump => {
-                let offset = read_short(&mut state);
+                let offset = read_short(state);
                 state.frame_mut().ip += offset as usize;
             }
             OpCode::JumpIfFalse => {
-                let offset = read_short(&mut state);
+                let offset = read_short(state);
                 if let Value::Bool(condition_value) = state.locals.last().unwrap() {
                     if !condition_value {
                         state.frame_mut().ip += offset as usize;
@@ -246,19 +314,20 @@ fn execute(mut state: State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "if statement requires boolean condition",
-                        compute_line_number(&state, -3),
+                        compute_line_number(state, -3),
                     ));
                 }
             }
             OpCode::Loop => {
-                let offset = read_short(&mut state);
+                let offset = read_short(state);
                 state.frame_mut().ip -= offset as usize;
             }
             OpCode::Call => {
-                let arg_count = read_byte(&mut state);
+                let arg_count = read_byte(state);
                 // cloning values should be cheap (functions use Rc)
-                let callee: Value = state.locals[state.locals.len() - 1 - (arg_count as usize)].clone();
-                call_value(&mut state, callee, arg_count)?;
+                let callee: Value =
+                    state.locals[state.locals.len() - 1 - (arg_count as usize)].clone();
+                call_value(state, callee, arg_count)?;
             }
         }
     }
@@ -283,7 +352,9 @@ fn read_constant(state: &mut State) -> Value {
     let index = read_byte(state);
     let value = &state.frame().function.chunk.values[index as usize];
 
-    println!("Constant {index:04} = {value}");
+    if DEBUG_TRACING {
+        println!("Constant {index:04} = {value}");
+    }
 
     // TODO: need to clone this?
     value.clone()
@@ -297,21 +368,55 @@ fn pop_binary_operands(stack: &mut Vec<Value>) -> (Value, Value) {
 
 fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()> {
     if state.call_stack.len() >= FRAMES_MAX {
-        return Err(build_error("Stack overflow.", last_line_number(state)))
+        return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
     match callee {
         Value::Function(function) => {
             if function.arity != arg_count {
-                return Err(build_error(&format!("Expected {} arguments but received {}.", function.arity, arg_count), last_line_number(state)))
+                return Err(build_error(
+                    &format!(
+                        "Expected {} arguments but received {}.",
+                        function.arity, arg_count
+                    ),
+                    last_line_number(state),
+                ));
             }
 
             // this should point to the location of the callee on the stack, arguments will begin in slot 1 relative to this base pointer
             let locals_base = state.locals.len() - (arg_count as usize) - 1;
 
-            state.call_stack.push(CallFrame { ip: 0, locals_base, function })
+            state.call_stack.push(CallFrame {
+                ip: 0,
+                locals_base,
+                function,
+            })
         }
-        _ => return Err(build_error("Can only call functions and classes.", last_line_number(state))),
+        Value::NativeFunction(native_function) => {
+            if native_function.arity != arg_count {
+                return Err(build_error(
+                    &format!(
+                        "Expected {} arguments but received {}.",
+                        native_function.arity, arg_count
+                    ),
+                    last_line_number(state),
+                ));
+            }
+
+            let args_begin = state.locals.len() - (arg_count as usize);
+            let args = &state.locals[args_begin..state.locals.len()];
+            let result = (native_function.func)(args);
+
+            // make sure to pop the native function callable itself which is the entry before the first argument
+            state.locals.drain((args_begin - 1)..state.locals.len());
+            state.locals.push(result);
+        }
+        _ => {
+            return Err(build_error(
+                "Can only call functions and classes.",
+                last_line_number(state),
+            ))
+        }
     }
     Ok(())
 }

@@ -71,7 +71,8 @@ pub enum Value {
     Nil,
     Number(f64),
     String(String),
-    Function(Rc<Function>)
+    Function(Rc<Function>),
+    NativeFunction(Rc<NativeFunction>),
 }
 
 impl fmt::Display for Value {
@@ -85,6 +86,7 @@ impl fmt::Display for Value {
                 Self::Number(value) => value.to_string(),
                 Self::String(value) => value.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
                 Self::Function(value) => value.name.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
+                Self::NativeFunction(value) => value.name.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
             }
         )
     }
@@ -111,6 +113,12 @@ impl From<String> for Value {
 impl From<Function> for Value {
     fn from(func: Function) -> Value {
         Value::Function(Rc::new(func))
+    }
+}
+
+impl From<NativeFunction> for Value {
+    fn from(func: NativeFunction) -> Value {
+        Value::NativeFunction(Rc::new(func))
     }
 }
 
@@ -149,11 +157,33 @@ impl Chunk {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Function {
     pub arity: u8,
     pub chunk: Chunk,
     pub name: String,
+}
+
+pub struct NativeFunction {
+    pub arity: u8,
+    pub func: fn(arguments: &[Value]) -> Value,
+    pub name: String,
+}
+
+impl PartialEq for NativeFunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.arity == other.arity && self.name == other.name
+    }
+}
+
+impl fmt::Debug for NativeFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NativeFunction")
+         .field("arity", &self.arity)
+         .field("func", &"NATIVE_FUNCTION")
+         .field("name", &self.name)
+         .finish()
+    }
 }
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {

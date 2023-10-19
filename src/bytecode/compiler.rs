@@ -8,7 +8,7 @@ use super::code::{self, Chunk, Function, OpCode, Value};
 
 type UnitResult = BasicResult<()>;
 
-static DEBUG_DUMP_CHUNK: bool = true;
+const DEBUG_DUMP_CHUNK: bool = false;
 
 struct Parser {
     scanner: Scanner,
@@ -142,8 +142,6 @@ impl Compiler {
     }
 
     fn add_local(&mut self, name: Token) {
-        println!("Adding local {}", name.lexeme);
-
         if self.locals.len() >= u8::MAX.into() {
             panic!("Locals in scope limited to 256 entries at the moment.");
         }
@@ -203,7 +201,7 @@ struct ParseRule {
 // Each entry includes corresponding TokenType either for index sorting or for sanity checking if table is used directly
 #[rustfmt::skip]
 const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
-    (TokenType::LeftParen,      ParseRule { prefix: Some(grouping), infix: Some(call),            precedence: PREC_CALL }),
+    (TokenType::LeftParen,      ParseRule { prefix: Some(grouping), infix: Some(call),      precedence: PREC_CALL }),
     (TokenType::RightParen,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::LeftBrace,      ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }), 
     (TokenType::RightBrace,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
