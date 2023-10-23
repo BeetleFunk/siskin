@@ -29,9 +29,12 @@ pub enum OpCode {
     JumpIfFalse,
     Loop,
     Call,
+    Closure,
+    GetUpvalue,
+    SetUpvalue,
 }
 
-const OP_TABLE: [OpCode; 25] = [
+const OP_TABLE: [OpCode; 28] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -57,6 +60,9 @@ const OP_TABLE: [OpCode; 25] = [
     OpCode::JumpIfFalse,
     OpCode::Loop,
     OpCode::Call,
+    OpCode::Closure,
+    OpCode::GetUpvalue,
+    OpCode::SetUpvalue,
 ];
 
 impl From<u8> for OpCode {
@@ -71,7 +77,8 @@ pub enum Value {
     Nil,
     Number(f64),
     String(String),
-    Function(Rc<Function>),
+    Function(Rc<Function>), // compile time representation of a function
+    Closure(Rc<Closure>), // runtime representation of a function
     NativeFunction(Rc<NativeFunction>),
 }
 
@@ -84,9 +91,11 @@ impl fmt::Display for Value {
                 Self::Bool(value) => value.to_string(),
                 Self::Nil => "Nil".to_string(),
                 Self::Number(value) => value.to_string(),
-                Self::String(value) => value.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
-                Self::Function(value) => value.name.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
-                Self::NativeFunction(value) => value.name.clone(), // TODO: avoid cloning here, figure this out with Object and String rework
+                // TODO: avoid cloning strings for these cases
+                Self::String(value) => value.clone(),
+                Self::Function(value) => value.name.clone(),
+                Self::NativeFunction(value) => value.name.clone(),
+                Self::Closure(value) => value.function.name.clone(),
             }
         )
     }
@@ -113,6 +122,12 @@ impl From<String> for Value {
 impl From<Function> for Value {
     fn from(func: Function) -> Value {
         Value::Function(Rc::new(func))
+    }
+}
+
+impl From<Closure> for Value {
+    fn from(closure: Closure) -> Value {
+        Value::Closure(Rc::new(closure))
     }
 }
 
@@ -162,6 +177,11 @@ pub struct Function {
     pub arity: u8,
     pub chunk: Chunk,
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Closure {
+    pub function: Rc<Function>,
 }
 
 pub struct NativeFunction {
@@ -231,6 +251,9 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::JumpIfFalse => short_instruction("JumpIfFalse", chunk, offset),
         OpCode::Loop => short_instruction("Loop", chunk, offset),
         OpCode::Call => byte_instruction("Call", chunk, offset),
+        OpCode::Closure => closure(chunk, offset),
+        OpCode::GetUpvalue => byte_instruction("GetUpvalue", chunk, offset),
+        OpCode::SetUpvalue => byte_instruction("SetUpvalue", chunk, offset),
     }
 }
 
@@ -260,4 +283,11 @@ fn short_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
     let short = ((high_byte as u16) << 8) + low_byte as u16;
     println!("{opcode_name} {short:06}");
     3
+}
+
+fn closure(chunk: &Chunk, offset: usize) -> usize {
+    let index = chunk.code[offset + 1];
+    let value = &chunk.values[index as usize];
+    println!("CLOSURE {index:04} = {value}");
+    2
 }

@@ -40,21 +40,27 @@ impl Parser {
     }
 }
 
-struct Compiler {
-    parser: Parser,
-    func_stack: Vec<CompilerFunction>,
-    locals: Vec<Local>,
-    scope_depth: u32,
-}
-
 struct CompilerFunction {
     func: Function,
     locals_offset: usize,
+    upvalues: Vec<Upvalue>,
+}
+
+struct Upvalue {
+    is_local: bool,
+    index: u8,
 }
 
 struct Local {
     name: Token,
     depth: u32,
+}
+
+struct Compiler {
+    parser: Parser,
+    func_stack: Vec<CompilerFunction>,
+    locals: Vec<Local>, // !!!! move locals into compiler function?
+    scope_depth: u32,
 }
 
 impl Compiler {
@@ -70,6 +76,7 @@ impl Compiler {
             func_stack: vec![CompilerFunction {
                 func: root_func,
                 locals_offset: 0,
+                upvalues: Vec::new(),
             }],
             locals: Vec::new(),
             scope_depth: 0,
@@ -153,6 +160,38 @@ impl Compiler {
     }
 
     fn compute_local_index(&self, name: &str) -> Option<u8> {
+        let base_offset = self.func_stack.last().unwrap().locals_offset;
+        let available = &self.locals[base_offset..self.locals.len()];
+        if let Some((match_index, _)) = available
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|entry| entry.1.name.lexeme == name)
+        {
+            Some(match_index as u8)
+        } else {
+            None
+        }
+    }
+
+    fn resolve_upvalue(&mut self, name: &str) -> Option<u8> {
+        let origin: usize;
+        // TODO: skip the current func
+        for (index, func) in self.func_stack.iter().enumerate().rev() {
+            
+        }
+
+        if let Some((match_index, _)) = self.func_stack
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|entry| entry.1.name.lexeme == name)
+        {
+            Some(match_index as u8)
+        } else {
+            None
+        }
+
         let base_offset = self.func_stack.last().unwrap().locals_offset;
         let available = &self.locals[base_offset..self.locals.len()];
         if let Some((match_index, _)) = available
@@ -377,7 +416,7 @@ fn function(compiler: &mut Compiler, name: String, locals_offset: usize) -> Unit
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
     let func_value = compiler.func_stack.pop().unwrap().func.into();
     let index = compiler.chunk_mut().add_constant(func_value);
-    compiler.emit_data_op(OpCode::Constant, index);
+    compiler.emit_data_op(OpCode::Closure, index);
 
     Ok(())
 }

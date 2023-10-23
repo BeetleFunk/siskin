@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Function, NativeFunction, OpCode, Value};
+use super::code::{self, Closure, NativeFunction, OpCode, Value};
 use super::compiler;
 
 const DEBUG_TRACING: bool = false;
@@ -90,7 +90,7 @@ fn native_sqrt(args: &[Value]) -> Value {
 struct CallFrame {
     ip: usize,
     locals_base: usize, // base index for function locals within the VM locals stack
-    function: Rc<Function>,
+    closure: Rc<Closure>,
 }
 
 pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
@@ -98,7 +98,9 @@ pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
     let mut vm_state = State::new(CallFrame {
         ip: 0,
         locals_base: 0,
-        function: Rc::new(root_func),
+        closure: Rc::new(Closure {
+            function: Rc::new(root_func),
+        }),
     });
     let result = execute(&mut vm_state, output);
 
@@ -112,11 +114,11 @@ pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
 
 fn print_stack_trace(state: &State, output: &mut dyn Write) {
     for frame in state.call_stack.iter().rev() {
-        let line = frame.function.chunk.line_numbers[frame.ip - 1];
-        let name = if frame.function.name.is_empty() {
+        let line = frame.closure.function.chunk.line_numbers[frame.ip - 1];
+        let name = if frame.closure.function.name.is_empty() {
             "script"
         } else {
-            &frame.function.name
+            &frame.closure.function.name
         };
         writeln!(output, " ---   line {line} in {name}").expect("Output writer should succeed.");
     }
@@ -127,7 +129,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
         if DEBUG_TRACING {
             print_stack(&state.locals);
             let frame = state.frame();
-            code::disassemble_instruction(&frame.function.chunk, frame.ip);
+            code::disassemble_instruction(&frame.closure.function.chunk, frame.ip);
         }
 
         let opcode: OpCode = read_byte(state).into();
@@ -329,6 +331,14 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     state.locals[state.locals.len() - 1 - (arg_count as usize)].clone();
                 call_value(state, callee, arg_count)?;
             }
+            OpCode::Closure => {
+                let value = read_constant(state);
+                if let Value::Function(function) = value {
+                    state.locals.push(Value::from(Closure { function }));
+                } else {
+                    panic!("Expected function constant for OpCode::Closure instruction.");
+                }
+            }
         }
     }
 
@@ -337,7 +347,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
 
 fn read_byte(state: &mut State) -> u8 {
     let frame = state.frame_mut();
-    let byte = frame.function.chunk.code[frame.ip];
+    let byte = frame.closure.function.chunk.code[frame.ip];
     frame.ip += 1;
     byte
 }
@@ -350,7 +360,7 @@ fn read_short(state: &mut State) -> u16 {
 
 fn read_constant(state: &mut State) -> Value {
     let index = read_byte(state);
-    let value = &state.frame().function.chunk.values[index as usize];
+    let value = &state.frame().closure.function.chunk.values[index as usize];
 
     if DEBUG_TRACING {
         println!("Constant {index:04} = {value}");
@@ -372,12 +382,12 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
     }
 
     match callee {
-        Value::Function(function) => {
-            if function.arity != arg_count {
+        Value::Closure(closure) => {
+            if closure.function.arity != arg_count {
                 return Err(build_error(
                     &format!(
                         "Expected {} arguments but received {}.",
-                        function.arity, arg_count
+                        closure.function.arity, arg_count
                     ),
                     last_line_number(state),
                 ));
@@ -389,7 +399,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             state.call_stack.push(CallFrame {
                 ip: 0,
                 locals_base,
-                function,
+                closure,
             })
         }
         Value::NativeFunction(native_function) => {
@@ -436,7 +446,7 @@ fn last_line_number(state: &State) -> u32 {
 fn compute_line_number(state: &State, offset: isize) -> u32 {
     let frame = state.frame();
     let index = (frame.ip as isize) + offset;
-    frame.function.chunk.line_numbers[index as usize]
+    frame.closure.function.chunk.line_numbers[index as usize]
 }
 
 fn build_error(message: &str, line: u32) -> BasicError {
