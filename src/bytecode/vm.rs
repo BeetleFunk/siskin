@@ -339,6 +339,12 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     panic!("Expected function constant for OpCode::Closure instruction.");
                 }
             }
+            OpCode::GetUpvalue => {
+                todo!();
+            }
+            OpCode::SetUpvalue => {
+                todo!();
+            }
         }
     }
 

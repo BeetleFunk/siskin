@@ -387,3 +387,17 @@ fn native_function() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn simple() -> TestResult {
+    let code = "\
+        fun printThing(arg) {
+            print arg;
+        }
+        printThing(\"boom\");";
+
+    let output = run(code)?;
+    assert_eq!("boom\n", output);
+
+    Ok(())
+}
