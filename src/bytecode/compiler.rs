@@ -8,7 +8,7 @@ use super::code::{self, Chunk, Function, OpCode, Value};
 
 type UnitResult = BasicResult<()>;
 
-const DEBUG_DUMP_CHUNK: bool = false;
+const DEBUG_DUMP_CHUNK: bool = true;
 
 struct Parser {
     scanner: Scanner,
@@ -40,21 +40,26 @@ impl Parser {
     }
 }
 
-struct Compiler {
-    parser: Parser,
-    func_stack: Vec<CompilerFunction>,
-    locals: Vec<Local>,
-    scope_depth: u32,
-}
-
-struct CompilerFunction {
-    func: Function,
-    locals_offset: usize,
+struct Upvalue {
+    is_local: bool,
+    index: u8,
 }
 
 struct Local {
     name: Token,
     depth: u32,
+}
+
+struct CompilerFunction {
+    func: Function,
+    locals: Vec<Local>,
+    upvalues: Vec<Upvalue>,
+}
+
+struct Compiler {
+    parser: Parser,
+    func_stack: Vec<CompilerFunction>,
+    scope_depth: u32,
 }
 
 impl Compiler {
@@ -69,11 +74,19 @@ impl Compiler {
             parser,
             func_stack: vec![CompilerFunction {
                 func: root_func,
-                locals_offset: 0,
+                locals: Vec::new(),
+                upvalues: Vec::new(),
             }],
-            locals: Vec::new(),
             scope_depth: 0,
         }
+    }
+
+    fn func(&self) -> &CompilerFunction {
+        self.func_stack.last().unwrap()
+    }
+
+    fn func_mut(&mut self) -> &mut CompilerFunction {
+        self.func_stack.last_mut().unwrap()
     }
 
     fn chunk(&self) -> &Chunk {
@@ -131,31 +144,34 @@ impl Compiler {
     fn end_scope(&mut self) {
         self.scope_depth -= 1;
 
-        while let Some(last) = self.locals.last() {
+        while let Some(last) = self.func().locals.last() {
             if last.depth > self.scope_depth {
-                self.locals.pop();
+                self.func_mut().locals.pop();
                 self.emit_op(OpCode::Pop);
             } else {
+                // locals stack is in depth order, so no need to proceed once an entry with lower depth is reached
                 break;
             }
         }
     }
 
     fn add_local(&mut self, name: Token) {
-        if self.locals.len() >= u8::MAX.into() {
+        if self.func().locals.len() >= u8::MAX.into() {
             panic!("Locals in scope limited to 256 entries at the moment.");
         }
 
-        self.locals.push(Local {
+        let entry = Local {
             name,
             depth: self.scope_depth,
-        })
+        };
+
+        self.func_mut().locals.push(entry)
     }
 
     fn compute_local_index(&self, name: &str) -> Option<u8> {
-        let base_offset = self.func_stack.last().unwrap().locals_offset;
-        let available = &self.locals[base_offset..self.locals.len()];
-        if let Some((match_index, _)) = available
+        if let Some((match_index, _)) = self
+            .func()
+            .locals
             .iter()
             .enumerate()
             .rev()
@@ -167,8 +183,39 @@ impl Compiler {
         }
     }
 
+    // fn resolve_upvalue(&mut self, name: &str) -> Option<u8> {
+    //     let origin: usize;
+    //     // TODO: skip the current func
+    //     for (index, func) in self.func_stack.iter().enumerate().rev() {}
+
+    //     if let Some((match_index, _)) = self
+    //         .func_stack
+    //         .iter()
+    //         .enumerate()
+    //         .rev()
+    //         .find(|entry| entry.1.name.lexeme == name)
+    //     {
+    //         Some(match_index as u8)
+    //     } else {
+    //         None
+    //     }
+
+    //     let base_offset = self.func_stack.last().unwrap().locals_offset;
+    //     let available = &self.locals[base_offset..self.locals.len()];
+    //     if let Some((match_index, _)) = available
+    //         .iter()
+    //         .enumerate()
+    //         .rev()
+    //         .find(|entry| entry.1.name.lexeme == name)
+    //     {
+    //         Some(match_index as u8)
+    //     } else {
+    //         None
+    //     }
+    // }
+
     fn identifier_in_current_scope(&self, name: &str) -> bool {
-        for local in self.locals.iter().rev() {
+        for local in self.func().locals.iter().rev() {
             // locals are always added in order of scope depth, so we can bail as soon as we hit one at a lower depth
             if local.depth != self.scope_depth {
                 return false;
@@ -256,7 +303,7 @@ pub fn compile(source: &str) -> result::Result<Function, BasicError> {
     emit_empty_return(&mut compiler);
 
     if DEBUG_DUMP_CHUNK {
-        code::disassemble_chunk(&compiler.func_stack[0].func.chunk, "name");
+        code::disassemble_chunk(&compiler.func_stack[0].func.chunk, "root");
     }
 
     Ok(compiler.func_stack.remove(0).func)
@@ -304,64 +351,51 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
 }
 
 fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
-    let identifier = compiler
-        .consume(TokenType::Identifier, "Expect function name.")?
-        .clone();
-    let name = identifier.extract_name();
-    let locals_offset = compiler.locals.len();
+    let identifier = compiler.consume(TokenType::Identifier, "Expect function name.")?.clone();
+
+    function(compiler, identifier.clone())?;
 
     if compiler.scope_depth == 0 {
-        // for global scope, add a temporary empty entry to compiler locals to get the proper offset into the value stack
-        // at runtime the function value being called will always be in stack slot zero (relative to the function call frame)
-        let mut dummy_entry = identifier.clone();
-        dummy_entry.lexeme = "".to_string();
-        compiler.add_local(dummy_entry);
+        let index = compiler.chunk_mut().add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
+        define_global(compiler, index)
     } else {
-        // for non-global scope, add the function to locals before proceeding to facilitate recursion
         // unlike variables, functions are not allowed to shadow existing names
-        if compiler.identifier_in_current_scope(name) {
-            build_error(
+        if compiler.identifier_in_current_scope(identifier.extract_name()) {
+            return Err(build_error(
                 &format!(
                     "Already a variable in scope matching the function name ({}).",
-                    name
+                    identifier.extract_name()
                 ),
                 identifier.line,
-            );
+            ));
+        } else {
+            compiler.add_local(identifier);
         }
-        compiler.add_local(identifier.clone());
-    }
-
-    function(compiler, name.clone(), locals_offset)?;
-
-    if compiler.scope_depth == 0 {
-        // if in global scope, the temporary entry in locals must be popped off after compiling the function (see above)
-        let dummy_entry = compiler.locals.pop().unwrap();
-        if !dummy_entry.name.lexeme.is_empty() {
-            // if we are popping a non-temporary local then something very bad has happened, function helper should have cleaned up
-            panic!("Expected temporary value on the compiler local stack after compilation");
-        }
-
-        let index = compiler.chunk_mut().add_constant(Value::from(name.clone())); // TODO: how to avoid the clone here?
-        define_global(compiler, index)
     }
 
     Ok(())
 }
 
-fn function(compiler: &mut Compiler, name: String, locals_offset: usize) -> UnitResult {
-    compiler.begin_scope();
-
+fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
-    let arity = function_parameters(compiler)?;
     compiler.func_stack.push(CompilerFunction {
         func: Function {
-            arity,
+            arity: 0,
             chunk: Chunk::new(),
-            name,
+            name: name.extract_name().clone(),
         },
-        locals_offset,
+        locals: Vec::new(),
+        upvalues: Vec::new(),
     });
+
+    compiler.begin_scope();
+
+    // the function calling convention always has the callee in local slot zero
+    compiler.add_local(name);
+
+    let arity = function_parameters(compiler)?;
+    compiler.func_mut().func.arity = arity;
 
     compiler.consume(
         TokenType::RightParen,
@@ -377,7 +411,7 @@ fn function(compiler: &mut Compiler, name: String, locals_offset: usize) -> Unit
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
     let func_value = compiler.func_stack.pop().unwrap().func.into();
     let index = compiler.chunk_mut().add_constant(func_value);
-    compiler.emit_data_op(OpCode::Constant, index);
+    compiler.emit_data_op(OpCode::Closure, index);
 
     Ok(())
 }
