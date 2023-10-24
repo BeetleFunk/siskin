@@ -289,10 +289,11 @@ fn closure(chunk: &Chunk, offset: usize) -> usize {
     let index = chunk.code[offset + 1];
     let value = &chunk.values[index as usize];
 
-    if let Value::Closure(closure) = value {
-        disassemble_chunk(&closure.function.chunk, &closure.function.name);
+    println!("CLOSURE {index:04} = {value}");
+    if let Value::Function(function) = value {
+        disassemble_chunk(&function.chunk, &function.name);
+        println!("== end {} ==", &function.name);
     }
 
-    println!("CLOSURE {index:04} = {value}");
     2
 }

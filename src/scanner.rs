@@ -81,7 +81,7 @@ impl Token {
 
     pub fn extract_string(&self) -> &String {
         if matches!(self.token_type, TokenType::String) {
-            if let Some(TokenValue::String(value)) = self.token_value.as_ref() {
+            if let Some(TokenValue::String(value)) = &self.token_value {
                 value
             } else {
                 panic!("String token did not have a string value");
@@ -93,10 +93,10 @@ impl Token {
 
     pub fn extract_name(&self) -> &String {
         if matches!(self.token_type, TokenType::Identifier) {
-            if let Some(TokenValue::Name(value)) = self.token_value.as_ref() {
+            if let Some(TokenValue::Name(value)) = &self.token_value {
                 value
             } else {
-                panic!("Identifier token did not have a string value");
+                panic!("Identifier token did not have a name value");
             }
         } else {
             panic!("Called extract_name on non-identifier token");

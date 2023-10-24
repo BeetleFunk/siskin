@@ -351,64 +351,51 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
 }
 
 fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
-    let identifier = compiler
-        .consume(TokenType::Identifier, "Expect function name.")?
-        .clone();
-    let name = identifier.extract_name();
+    let identifier = compiler.consume(TokenType::Identifier, "Expect function name.")?.clone();
+
+    function(compiler, identifier.clone())?;
 
     if compiler.scope_depth == 0 {
-        // for global scope, add a temporary empty entry to compiler locals to get the proper offset into the value stack
-        // at runtime the function value being called will always be in stack slot zero (relative to the function call frame)
-        let mut dummy_entry = identifier.clone();
-        dummy_entry.lexeme = "".to_string();
-        compiler.add_local(dummy_entry);
+        let index = compiler.chunk_mut().add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
+        define_global(compiler, index)
     } else {
-        // for non-global scope, add the function to locals before proceeding to facilitate recursion
         // unlike variables, functions are not allowed to shadow existing names
-        if compiler.identifier_in_current_scope(name) {
-            build_error(
+        if compiler.identifier_in_current_scope(identifier.extract_name()) {
+            return Err(build_error(
                 &format!(
                     "Already a variable in scope matching the function name ({}).",
-                    name
+                    identifier.extract_name()
                 ),
                 identifier.line,
-            );
+            ));
+        } else {
+            compiler.add_local(identifier);
         }
-        compiler.add_local(identifier.clone());
-    }
-
-    function(compiler, name.clone())?;
-
-    if compiler.scope_depth == 0 {
-        // if in global scope, the temporary entry in locals must be popped off after compiling the function (see above)
-        let dummy_entry = compiler.func_mut().locals.pop().unwrap();
-        if !dummy_entry.name.lexeme.is_empty() {
-            // if we are popping a non-temporary local then something very bad has happened, function helper should have cleaned up
-            panic!("Expected temporary value on the compiler local stack after compilation");
-        }
-
-        let index = compiler.chunk_mut().add_constant(Value::from(name.clone())); // TODO: how to avoid the clone here?
-        define_global(compiler, index)
     }
 
     Ok(())
 }
 
-fn function(compiler: &mut Compiler, name: String) -> UnitResult {
-    compiler.begin_scope();
-
+fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
-    let arity = function_parameters(compiler)?;
     compiler.func_stack.push(CompilerFunction {
         func: Function {
-            arity,
+            arity: 0,
             chunk: Chunk::new(),
-            name,
+            name: name.extract_name().clone(),
         },
         locals: Vec::new(),
         upvalues: Vec::new(),
     });
+
+    compiler.begin_scope();
+
+    // the function calling convention always has the callee in local slot zero
+    compiler.add_local(name);
+
+    let arity = function_parameters(compiler)?;
+    compiler.func_mut().func.arity = arity;
 
     compiler.consume(
         TokenType::RightParen,
