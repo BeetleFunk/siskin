@@ -67,6 +67,7 @@ impl Compiler {
         // toplevel bytecode for a script will end up in this root function
         let root_func = Function {
             arity: 0,
+            upvalue_count: 0,
             chunk: Chunk::new(),
             name: "".to_string(),
         };
@@ -196,7 +197,7 @@ impl Compiler {
         // second to last entry on the stack is the nearest enclosing function (first ancestor)
         let ancestors = &self.func_stack[0..(self.func_stack.len() - 1)];
         let mut upvalue_location: Option<(usize, u8)> = None;
-        // search from innermost to outermost enclosing function (stack top to stack bottom)
+        // search for a matching local starting from innermost to outermost enclosing functions (stack top to stack bottom)
         for (function_index, function) in ancestors.iter().enumerate().rev() {
             if let Some(local_index) = Compiler::resolve_function_local(function, name) {
                 upvalue_location = Some((function_index, local_index));
@@ -204,12 +205,14 @@ impl Compiler {
         }
 
         if let Some((function_index, local_index)) = upvalue_location {
-            // work from the outermost capture location to the current function, adding an upvalue entry for each along the way
-            let mut parent_upvalue_index =
-                Compiler::add_upvalue(&mut self.func_stack[function_index], true, local_index);
+            // work from the first capture location to the current function, adding an upvalue entry for each along the way
+            let mut parent_upvalue_index = local_index;
+            let mut is_local = true;
             let func_stack_length = self.func_stack.len();
             for function in self.func_stack[(function_index + 1)..func_stack_length].iter_mut() {
-                parent_upvalue_index = Compiler::add_upvalue(function, false, parent_upvalue_index);
+                parent_upvalue_index = Compiler::add_upvalue(function, is_local, parent_upvalue_index);
+                // the first capture points to an enclosing function's local but all upvalues down the line will not
+                is_local = false;
             }
             Some(parent_upvalue_index)
         } else {
@@ -233,6 +236,7 @@ impl Compiler {
             matching_index as u8
         } else {
             function.upvalues.push(Upvalue { is_local, index });
+            function.definition.upvalue_count = function.upvalues.len() as u8;
             (function.upvalues.len() - 1) as u8
         }
     }
@@ -409,6 +413,7 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.func_stack.push(CompilerFunction {
         definition: Function {
             arity: 0,
+            upvalue_count: 0,
             chunk: Chunk::new(),
             name: name.extract_name().clone(),
         },
@@ -436,9 +441,15 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.end_scope();
 
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
-    let func_value = compiler.func_stack.pop().unwrap().definition.into();
-    let index = compiler.chunk_mut().add_constant(func_value);
-    compiler.emit_data_op(OpCode::Closure, index);
+    let compiled_func = compiler.func_stack.pop().unwrap();
+    let constant_index = compiler
+        .chunk_mut()
+        .add_constant(compiled_func.definition.into());
+    compiler.emit_data_op(OpCode::Closure, constant_index);
+    for upvalue in compiled_func.upvalues {
+        let is_local = if upvalue.is_local { 1 } else { 0 };
+        compiler.emit_data(is_local, upvalue.index);
+    }
 
     Ok(())
 }

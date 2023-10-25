@@ -387,3 +387,25 @@ fn native_function() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn testing_upvalue() -> TestResult {
+    let code = "\
+    fun outer() {
+        var a = 1;
+        var b = 2;
+        fun middle() {
+          var c = 3;
+          var d = 4;
+          fun inner() {
+            print a + c + b + d;
+          }
+        }
+      }";
+
+    let output = run(code)?;
+
+    assert_eq!("", output);
+
+    Ok(())
+}

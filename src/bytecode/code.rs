@@ -175,6 +175,7 @@ impl Chunk {
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub arity: u8,
+    pub upvalue_count: u8,
     pub chunk: Chunk,
     pub name: String,
 }
@@ -286,14 +287,25 @@ fn short_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
 }
 
 fn closure(chunk: &Chunk, offset: usize) -> usize {
-    let index = chunk.code[offset + 1];
-    let value = &chunk.values[index as usize];
+    let function_index = chunk.code[offset + 1];
+    let value = &chunk.values[function_index as usize];
 
-    println!("CLOSURE {index:04} = {value}");
+    println!("CLOSURE {function_index:04} = {value}");
     if let Value::Function(function) = value {
+        for i in 0..function.upvalue_count {
+            let upvalue_offset = offset + 2 + (2 * (i as usize));
+            let is_local = chunk.code[upvalue_offset];
+            let slot_index = chunk.code[upvalue_offset + 1];
+            let capture_type = if is_local == 0 { "upvalue" } else { "local" };
+            println!("  | ({upvalue_offset:04}) captured: {capture_type} => slot {slot_index}");
+        }
+
         disassemble_chunk(&function.chunk, &function.name);
         println!("== end {} ==", &function.name);
-    }
 
-    2
+        // variable width encoding
+        2 + (2 * (function.upvalue_count as usize))
+    } else {
+        panic!("Unexpected value for closure")
+    }
 }
