@@ -51,7 +51,7 @@ struct Local {
 }
 
 struct CompilerFunction {
-    func: Function,
+    definition: Function,
     locals: Vec<Local>,
     upvalues: Vec<Upvalue>,
 }
@@ -73,7 +73,7 @@ impl Compiler {
         Compiler {
             parser,
             func_stack: vec![CompilerFunction {
-                func: root_func,
+                definition: root_func,
                 locals: Vec::new(),
                 upvalues: Vec::new(),
             }],
@@ -90,11 +90,11 @@ impl Compiler {
     }
 
     fn chunk(&self) -> &Chunk {
-        &self.func_stack.last().unwrap().func.chunk
+        &self.func_stack.last().unwrap().definition.chunk
     }
 
     fn chunk_mut(&mut self) -> &mut Chunk {
-        &mut self.func_stack.last_mut().unwrap().func.chunk
+        &mut self.func_stack.last_mut().unwrap().definition.chunk
     }
 
     fn emit_op(&mut self, byte: OpCode) {
@@ -168,9 +168,12 @@ impl Compiler {
         self.func_mut().locals.push(entry)
     }
 
-    fn compute_local_index(&self, name: &str) -> Option<u8> {
-        if let Some((match_index, _)) = self
-            .func()
+    fn resolve_local(&self, name: &str) -> Option<u8> {
+        Compiler::resolve_function_local(self.func(), name)
+    }
+
+    fn resolve_function_local(function: &CompilerFunction, name: &str) -> Option<u8> {
+        if let Some((match_index, _)) = function
             .locals
             .iter()
             .enumerate()
@@ -183,36 +186,56 @@ impl Compiler {
         }
     }
 
-    // fn resolve_upvalue(&mut self, name: &str) -> Option<u8> {
-    //     let origin: usize;
-    //     // TODO: skip the current func
-    //     for (index, func) in self.func_stack.iter().enumerate().rev() {}
+    // find a local from an enclosing function and automatically add upvalue entries for all functions in between
+    fn resolve_upvalue(&mut self, name: &str) -> Option<u8> {
+        if self.func_stack.len() <= 1 {
+            // no enclosing function to search
+            return None;
+        }
 
-    //     if let Some((match_index, _)) = self
-    //         .func_stack
-    //         .iter()
-    //         .enumerate()
-    //         .rev()
-    //         .find(|entry| entry.1.name.lexeme == name)
-    //     {
-    //         Some(match_index as u8)
-    //     } else {
-    //         None
-    //     }
+        // second to last entry on the stack is the nearest enclosing function (first ancestor)
+        let ancestors = &self.func_stack[0..(self.func_stack.len() - 1)];
+        let mut upvalue_location: Option<(usize, u8)> = None;
+        // search from innermost to outermost enclosing function (stack top to stack bottom)
+        for (function_index, function) in ancestors.iter().enumerate().rev() {
+            if let Some(local_index) = Compiler::resolve_function_local(function, name) {
+                upvalue_location = Some((function_index, local_index));
+            }
+        }
 
-    //     let base_offset = self.func_stack.last().unwrap().locals_offset;
-    //     let available = &self.locals[base_offset..self.locals.len()];
-    //     if let Some((match_index, _)) = available
-    //         .iter()
-    //         .enumerate()
-    //         .rev()
-    //         .find(|entry| entry.1.name.lexeme == name)
-    //     {
-    //         Some(match_index as u8)
-    //     } else {
-    //         None
-    //     }
-    // }
+        if let Some((function_index, local_index)) = upvalue_location {
+            // work from the outermost capture location to the current function, adding an upvalue entry for each along the way
+            let mut parent_upvalue_index =
+                Compiler::add_upvalue(&mut self.func_stack[function_index], true, local_index);
+            let func_stack_length = self.func_stack.len();
+            for function in self.func_stack[(function_index + 1)..func_stack_length].iter_mut() {
+                parent_upvalue_index = Compiler::add_upvalue(function, false, parent_upvalue_index);
+            }
+            Some(parent_upvalue_index)
+        } else {
+            None
+        }
+    }
+
+    fn add_upvalue(function: &mut CompilerFunction, is_local: bool, index: u8) -> u8 {
+        if function.upvalues.len() >= u8::MAX as usize {
+            panic!(
+                "Exceeded maximum upvalue count while processing function {}",
+                function.definition.name
+            )
+        }
+
+        if let Some(matching_index) = function
+            .upvalues
+            .iter()
+            .position(|upvalue| upvalue.is_local == is_local && upvalue.index == index)
+        {
+            matching_index as u8
+        } else {
+            function.upvalues.push(Upvalue { is_local, index });
+            (function.upvalues.len() - 1) as u8
+        }
+    }
 
     fn identifier_in_current_scope(&self, name: &str) -> bool {
         for local in self.func().locals.iter().rev() {
@@ -303,10 +326,10 @@ pub fn compile(source: &str) -> result::Result<Function, BasicError> {
     emit_empty_return(&mut compiler);
 
     if DEBUG_DUMP_CHUNK {
-        code::disassemble_chunk(&compiler.func_stack[0].func.chunk, "root");
+        code::disassemble_chunk(&compiler.func_stack[0].definition.chunk, "root");
     }
 
-    Ok(compiler.func_stack.remove(0).func)
+    Ok(compiler.func_stack.remove(0).definition)
 }
 
 fn declaration(compiler: &mut Compiler) -> UnitResult {
@@ -351,12 +374,16 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
 }
 
 fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
-    let identifier = compiler.consume(TokenType::Identifier, "Expect function name.")?.clone();
+    let identifier = compiler
+        .consume(TokenType::Identifier, "Expect function name.")?
+        .clone();
 
     function(compiler, identifier.clone())?;
 
     if compiler.scope_depth == 0 {
-        let index = compiler.chunk_mut().add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
+        let index = compiler
+            .chunk_mut()
+            .add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
         define_global(compiler, index)
     } else {
         // unlike variables, functions are not allowed to shadow existing names
@@ -380,7 +407,7 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
     compiler.func_stack.push(CompilerFunction {
-        func: Function {
+        definition: Function {
             arity: 0,
             chunk: Chunk::new(),
             name: name.extract_name().clone(),
@@ -395,7 +422,7 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.add_local(name);
 
     let arity = function_parameters(compiler)?;
-    compiler.func_mut().func.arity = arity;
+    compiler.func_mut().definition.arity = arity;
 
     compiler.consume(
         TokenType::RightParen,
@@ -409,7 +436,7 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     compiler.end_scope();
 
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
-    let func_value = compiler.func_stack.pop().unwrap().func.into();
+    let func_value = compiler.func_stack.pop().unwrap().definition.into();
     let index = compiler.chunk_mut().add_constant(func_value);
     compiler.emit_data_op(OpCode::Closure, index);
 
@@ -700,15 +727,17 @@ fn literal(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
 }
 
 fn variable(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
-    let name = compiler.parser.previous.extract_name();
+    let name = compiler.parser.previous.extract_name().clone();
     let index: u8;
     // look first for a matching local variable
-    let opcodes = if let Some(local_index) = compiler.compute_local_index(name) {
+    let opcodes = if let Some(local_index) = compiler.resolve_local(&name) {
         // use the stack offset as the opcode data
         index = local_index;
         (OpCode::SetLocal, OpCode::GetLocal)
+    } else if let Some(upvalue_index) = compiler.resolve_upvalue(&name) {
+        index = upvalue_index;
+        (OpCode::SetUpvalue, OpCode::GetUpvalue)
     } else {
-        let name = name.clone();
         // save the global variable name as a string in the constant table
         index = compiler.chunk_mut().add_constant(Value::from(name));
         (OpCode::SetGlobal, OpCode::GetGlobal)
