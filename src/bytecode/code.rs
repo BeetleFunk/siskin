@@ -78,7 +78,8 @@ pub enum Value {
     Number(f64),
     String(String),
     Function(Rc<Function>), // compile time representation of a function
-    Closure(Rc<Closure>), // runtime representation of a function
+    Closure(Rc<Closure>), // runtime-only representation of a function
+    //Upvalue(Upvalue), // runtime-only representation of an upvalue
     NativeFunction(Rc<NativeFunction>),
 }
 
@@ -94,8 +95,9 @@ impl fmt::Display for Value {
                 // TODO: avoid cloning strings for these cases
                 Self::String(value) => value.clone(),
                 Self::Function(value) => value.name.clone(),
-                Self::NativeFunction(value) => value.name.clone(),
                 Self::Closure(value) => value.function.name.clone(),
+                //Self::Upvalue(value) => "upvalue ".to_owned() + &value.raw_index.to_string(),
+                Self::NativeFunction(value) => value.name.clone(),
             }
         )
     }
@@ -183,6 +185,12 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
     pub function: Rc<Function>,
+    pub upvalues: Vec<Upvalue>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Upvalue {
+    pub raw_index: usize, // the location in the value_stack vector if this upvalue has not yet been closed
 }
 
 pub struct NativeFunction {

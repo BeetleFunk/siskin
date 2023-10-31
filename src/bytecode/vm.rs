@@ -7,10 +7,10 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Closure, NativeFunction, OpCode, Value};
+use super::code::{self, Closure, NativeFunction, OpCode, Value, Upvalue};
 use super::compiler;
 
-const DEBUG_TRACING: bool = false;
+const DEBUG_TRACING: bool = true;
 
 const FRAMES_MAX: usize = 256;
 
@@ -100,6 +100,7 @@ pub fn interpret(source: &str, output: &mut dyn Write) -> BasicResult<()> {
         locals_base: 0,
         closure: Rc::new(Closure {
             function: Rc::new(root_func),
+            upvalues: Vec::new(),
         }),
     });
     let result = execute(&mut vm_state, output);
@@ -334,16 +335,35 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Closure => {
                 let value = read_constant(state);
                 if let Value::Function(function) = value {
-                    state.locals.push(Value::from(Closure { function }));
+                    let mut upvalues = Vec::new();
+                    for _ in 0..function.upvalue_count {
+                        let is_local = read_byte(state) != 0;
+                        let slot_index = read_byte(state);
+                        if is_local {
+                            let raw_index = state.frame().locals_base + (slot_index as usize);
+                            upvalues.push(Upvalue { raw_index });
+                        } else {
+                            // copy the upvalue from the enclosing function (current frame on the top of the call stack)
+                            let enclosing_upvalue = &state.frame().closure.upvalues[slot_index as usize];
+                            upvalues.push(enclosing_upvalue.clone())
+                        }
+                    }
+                    state.locals.push(Value::from(Closure { function, upvalues }));
                 } else {
                     panic!("Expected function constant for OpCode::Closure instruction.");
                 }
             }
             OpCode::GetUpvalue => {
-                todo!();
+                let upvalue_slot = read_byte(state);
+                let upvalue = &state.frame().closure.upvalues[upvalue_slot as usize];
+                let cloned_val = state.locals[upvalue.raw_index].clone();
+                state.locals.push(cloned_val);
             }
             OpCode::SetUpvalue => {
-                todo!();
+                let upvalue_slot = read_byte(state);
+                let upvalue_location = state.frame().closure.upvalues[upvalue_slot as usize].raw_index;
+                let new_value = state.locals.last().unwrap().clone();
+                state.locals[upvalue_location] = new_value;
             }
         }
     }

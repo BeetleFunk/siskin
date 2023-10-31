@@ -389,23 +389,28 @@ fn native_function() -> TestResult {
 }
 
 #[test]
-fn testing_upvalue() -> TestResult {
+fn upvalues_on_stack() -> TestResult {
     let code = "\
-    fun outer() {
-        var a = 1;
-        var b = 2;
-        fun middle() {
-          var c = 3;
-          var d = 4;
-          fun inner() {
-            print a + c + b + d;
-          }
+        fun outer() {
+            var a = 1;
+            var b = 2;
+            fun middle() {
+                var c = 3;
+                var d = 4;
+                fun inner() {
+                    print a + c + b + d;
+                    a = 5;
+                }
+                inner();
+            }
+            middle();
+            print a;
         }
-      }";
+        outer();";
 
     let output = run(code)?;
 
-    assert_eq!("", output);
+    assert_eq!("10\n5\n", output);
 
     Ok(())
 }
