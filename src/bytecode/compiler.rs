@@ -48,6 +48,7 @@ struct Upvalue {
 struct Local {
     name: Token,
     depth: u32,
+    is_captured: bool,
 }
 
 struct CompilerFunction {
@@ -142,13 +143,21 @@ impl Compiler {
         self.scope_depth += 1;
     }
 
+    fn end_scope_no_emit(&mut self) {
+        self.scope_depth -= 1;
+    }
+
     fn end_scope(&mut self) {
         self.scope_depth -= 1;
 
         while let Some(last) = self.func().locals.last() {
             if last.depth > self.scope_depth {
-                self.func_mut().locals.pop();
-                self.emit_op(OpCode::Pop);
+                let local = self.func_mut().locals.pop().unwrap();
+                if local.is_captured {
+                    self.emit_op(OpCode::CloseUpvalue);
+                } else {
+                    self.emit_op(OpCode::Pop);
+                }
             } else {
                 // locals stack is in depth order, so no need to proceed once an entry with lower depth is reached
                 break;
@@ -164,6 +173,7 @@ impl Compiler {
         let entry = Local {
             name,
             depth: self.scope_depth,
+            is_captured: false,
         };
 
         self.func_mut().locals.push(entry)
@@ -205,12 +215,15 @@ impl Compiler {
         }
 
         if let Some((function_index, local_index)) = upvalue_location {
+            // mark the local itself as captured for special upvalue handling when it goes out of lexical scope
+            self.func_stack[function_index].locals[local_index as usize].is_captured = true;
             // work from the first capture location to the current function, adding an upvalue entry for each along the way
             let mut parent_upvalue_index = local_index;
             let mut is_local = true;
             let func_stack_length = self.func_stack.len();
             for function in self.func_stack[(function_index + 1)..func_stack_length].iter_mut() {
-                parent_upvalue_index = Compiler::add_upvalue(function, is_local, parent_upvalue_index);
+                parent_upvalue_index =
+                    Compiler::add_upvalue(function, is_local, parent_upvalue_index);
                 // the first capture points to an enclosing function's local but all upvalues down the line will not
                 is_local = false;
             }
@@ -438,7 +451,8 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
     block(compiler)?;
     emit_empty_return(compiler);
 
-    compiler.end_scope();
+    // TODO: figure out a cleaner way to do this, don't need to clean up function locals but do need to reset scope depth
+    compiler.end_scope_no_emit();
 
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
     let compiled_func = compiler.func_stack.pop().unwrap();

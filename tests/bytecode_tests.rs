@@ -414,3 +414,82 @@ fn upvalues_on_stack() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn upvalues_closed_on_return() -> TestResult {
+    let code = "\
+        fun outer() {
+            var a = 1;
+            var b = 2;
+            fun middle() {
+                print a + b;
+                a = a + 1;
+            }
+            return middle;
+        }
+        var closure = outer();
+        closure();
+        closure();
+        closure();";
+
+    let output = run(code)?;
+
+    assert_eq!("3\n4\n5\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn upvalues_closed_on_scope_exit() -> TestResult {
+    let code = "\
+        fun outer() {
+            var result;
+            {
+                var a = 1;
+                var b = 2;
+                fun middle() {
+                    print a + b;
+                    a = a + 1;
+                }
+                result = middle;
+            }
+            return result;
+        }
+        var closure = outer();
+        closure();
+        closure();
+        closure();";
+
+    let output = run(code)?;
+
+    assert_eq!("3\n4\n5\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn closure_variable_semantics() -> TestResult {
+    // closure variable will share the same upvalues (captured vars) as the assigned closure
+    let code = "\
+        fun outer() {
+            var a = 1;
+            var b = 2;
+            fun middle() {
+                print a + b;
+                a = a + 1;
+            }
+            return middle;
+        }
+        var closureRef1 = outer();
+        var closureRef2 = closureRef1;
+        closureRef1();
+        closureRef2();
+        closureRef1();
+        closureRef2();";
+
+    let output = run(code)?;
+
+    assert_eq!("3\n4\n5\n6\n", output);
+
+    Ok(())
+}

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
@@ -7,7 +8,7 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Closure, NativeFunction, OpCode, Value, Upvalue};
+use super::code::{self, Closure, NativeFunction, OpCode, Upvalue, Value};
 use super::compiler;
 
 const DEBUG_TRACING: bool = true;
@@ -18,17 +19,19 @@ const FRAMES_MAX: usize = 256;
 static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 
 struct State {
-    locals: Vec<Value>,
-    globals: HashMap<String, Value>,
     call_stack: Vec<CallFrame>,
+    value_stack: Vec<Value>,
+    globals: HashMap<String, Value>,
+    open_upvalues: Vec<Rc<Upvalue>>,
 }
 
 impl State {
     pub fn new(root_frame: CallFrame) -> Self {
         State {
-            locals: Vec::new(),
+            value_stack: Vec::new(),
             globals: create_globals(),
             call_stack: vec![root_frame],
+            open_upvalues: Vec::new(),
         }
     }
 
@@ -128,7 +131,7 @@ fn print_stack_trace(state: &State, output: &mut dyn Write) {
 fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
     loop {
         if DEBUG_TRACING {
-            print_stack(&state.locals);
+            print_stack(&state.value_stack);
             let frame = state.frame();
             code::disassemble_instruction(&frame.closure.function.chunk, frame.ip);
         }
@@ -136,28 +139,25 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
         let opcode: OpCode = read_byte(state).into();
         match opcode {
             OpCode::Return => {
-                let result = state.locals.pop().unwrap();
+                let result = state.value_stack.pop().unwrap();
                 let previous_frame = state.call_stack.pop().unwrap();
                 if state.call_stack.is_empty() {
                     // hit the end of the root function (script toplevel)
                     break;
+                } else {
+                    // pop all locals left by the previous frame as well as the callee itself
+                    pop_stack_and_close_upvalues(state, previous_frame.locals_base);
+                    // leave the function result on top of the stack
+                    state.value_stack.push(result);
                 }
-
-                // pop all locals left by the previous frame as well as the callee itself
-                let start = previous_frame.locals_base;
-                let end = state.locals.len();
-                state.locals.drain(start..end); //.for_each(|value| println!("Dropping {value}"));
-
-                // leave the result on top of the stack
-                state.locals.push(result);
             }
             OpCode::Constant => {
                 let value = read_constant(state);
-                state.locals.push(value);
+                state.value_stack.push(value);
             }
             OpCode::Negate => {
-                if let Value::Number(value) = state.locals.pop().unwrap() {
-                    state.locals.push(Value::from(-value));
+                if let Value::Number(value) = state.value_stack.pop().unwrap() {
+                    state.value_stack.push(Value::from(-value));
                 } else {
                     return Err(build_error(
                         "Negation requires numeric operand",
@@ -166,8 +166,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Not => {
-                if let Value::Bool(value) = state.locals.pop().unwrap() {
-                    state.locals.push(Value::from(!value));
+                if let Value::Bool(value) = state.value_stack.pop().unwrap() {
+                    state.value_stack.push(Value::from(!value));
                 } else {
                     return Err(build_error(
                         "Boolean inversion requires boolean operand",
@@ -176,14 +176,14 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Equal => {
-                let b = state.locals.pop().unwrap();
-                let a = state.locals.pop().unwrap();
-                state.locals.push(Value::from(a == b));
+                let b = state.value_stack.pop().unwrap();
+                let a = state.value_stack.pop().unwrap();
+                state.value_stack.push(Value::from(a == b));
             }
             OpCode::Greater => {
-                let operands = pop_binary_operands(&mut state.locals);
+                let operands = pop_binary_operands(&mut state.value_stack);
                 if let (Value::Number(a), Value::Number(b)) = operands {
-                    state.locals.push(Value::from(a > b));
+                    state.value_stack.push(Value::from(a > b));
                 } else {
                     return Err(build_error(
                         "Comparison requires numeric operands",
@@ -192,9 +192,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Less => {
-                let operands = pop_binary_operands(&mut state.locals);
+                let operands = pop_binary_operands(&mut state.value_stack);
                 if let (Value::Number(a), Value::Number(b)) = operands {
-                    state.locals.push(Value::from(a < b));
+                    state.value_stack.push(Value::from(a < b));
                 } else {
                     return Err(build_error(
                         "Comparison requires numeric operands",
@@ -203,11 +203,11 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Add => {
-                let operands = pop_binary_operands(&mut state.locals);
+                let operands = pop_binary_operands(&mut state.value_stack);
                 if let (Value::Number(a), Value::Number(b)) = operands {
-                    state.locals.push(Value::from(a + b));
+                    state.value_stack.push(Value::from(a + b));
                 } else if let (Value::String(a), Value::String(b)) = operands {
-                    state.locals.push(Value::from(a + &b));
+                    state.value_stack.push(Value::from(a + &b));
                 } else {
                     return Err(build_error(
                         "Addition requires either numeric or string operands",
@@ -216,9 +216,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Subtract => {
-                let operands = pop_binary_operands(&mut state.locals);
+                let operands = pop_binary_operands(&mut state.value_stack);
                 if let (Value::Number(a), Value::Number(b)) = operands {
-                    state.locals.push(Value::from(a - b));
+                    state.value_stack.push(Value::from(a - b));
                 } else {
                     return Err(build_error(
                         "Subtraction requires numeric operands",
@@ -227,9 +227,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Multiply => {
-                let operands = pop_binary_operands(&mut state.locals);
+                let operands = pop_binary_operands(&mut state.value_stack);
                 if let (Value::Number(a), Value::Number(b)) = operands {
-                    state.locals.push(Value::from(a * b));
+                    state.value_stack.push(Value::from(a * b));
                 } else {
                     return Err(build_error(
                         "Multiplication requires numeric operands",
@@ -238,9 +238,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Divide => {
-                let operands = pop_binary_operands(&mut state.locals);
+                let operands = pop_binary_operands(&mut state.value_stack);
                 if let (Value::Number(a), Value::Number(b)) = operands {
-                    state.locals.push(Value::from(a / b));
+                    state.value_stack.push(Value::from(a / b));
                 } else {
                     return Err(build_error(
                         "Division requires numeric operands",
@@ -248,17 +248,17 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     ));
                 }
             }
-            OpCode::Nil => state.locals.push(Value::Nil),
-            OpCode::True => state.locals.push(Value::Bool(true)),
-            OpCode::False => state.locals.push(Value::Bool(false)),
-            OpCode::Print => writeln!(output, "{}", state.locals.pop().unwrap())
+            OpCode::Nil => state.value_stack.push(Value::Nil),
+            OpCode::True => state.value_stack.push(Value::Bool(true)),
+            OpCode::False => state.value_stack.push(Value::Bool(false)),
+            OpCode::Print => writeln!(output, "{}", state.value_stack.pop().unwrap())
                 .expect("Output writer should succeed."),
             OpCode::Pop => {
-                state.locals.pop();
+                state.value_stack.pop();
             }
             OpCode::DefineGlobal => {
                 if let Value::String(name) = read_constant(state) {
-                    let value = state.locals.pop().unwrap();
+                    let value = state.value_stack.pop().unwrap();
                     state.globals.insert(name, value);
                 } else {
                     panic!("DefineGlobal must have a string constant for the variable name.");
@@ -267,7 +267,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::GetGlobal => {
                 if let Value::String(name) = read_constant(state) {
                     if let Some(value) = state.globals.get(&name) {
-                        state.locals.push(value.clone());
+                        state.value_stack.push(value.clone());
                     } else {
                         return Err(build_error(
                             &format!("Undefined variable {name}."),
@@ -283,7 +283,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     let entry = state.globals.entry(name);
                     if let std::collections::hash_map::Entry::Occupied(mut entry) = entry {
                         // avoid popping the value off the stack here, assignment result should be propagated
-                        entry.insert(state.locals.last().unwrap().clone());
+                        entry.insert(state.value_stack.last().unwrap().clone());
                     } else {
                         return Err(build_error(
                             &format!("Undefined variable {}.", entry.key()),
@@ -297,12 +297,14 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::GetLocal => {
                 let slot = read_byte(state);
                 let local_index = state.frame().locals_base + (slot as usize);
-                state.locals.push(state.locals[local_index].clone());
+                state
+                    .value_stack
+                    .push(state.value_stack[local_index].clone());
             }
             OpCode::SetLocal => {
                 let slot = read_byte(state);
                 let local_index = state.frame().locals_base + (slot as usize);
-                state.locals[local_index] = state.locals.last().unwrap().clone();
+                state.value_stack[local_index] = state.value_stack.last().unwrap().clone();
             }
             OpCode::Jump => {
                 let offset = read_short(state);
@@ -310,7 +312,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::JumpIfFalse => {
                 let offset = read_short(state);
-                if let Value::Bool(condition_value) = state.locals.last().unwrap() {
+                if let Value::Bool(condition_value) = state.value_stack.last().unwrap() {
                     if !condition_value {
                         state.frame_mut().ip += offset as usize;
                     }
@@ -329,7 +331,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 let arg_count = read_byte(state);
                 // cloning values should be cheap (functions use Rc)
                 let callee: Value =
-                    state.locals[state.locals.len() - 1 - (arg_count as usize)].clone();
+                    state.value_stack[state.value_stack.len() - 1 - (arg_count as usize)].clone();
                 call_value(state, callee, arg_count)?;
             }
             OpCode::Closure => {
@@ -340,15 +342,18 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         let is_local = read_byte(state) != 0;
                         let slot_index = read_byte(state);
                         if is_local {
-                            let raw_index = state.frame().locals_base + (slot_index as usize);
-                            upvalues.push(Upvalue { raw_index });
+                            let stack_index = state.frame().locals_base + (slot_index as usize);
+                            upvalues.push(create_upvalue(state, stack_index));
                         } else {
                             // copy the upvalue from the enclosing function (current frame on the top of the call stack)
-                            let enclosing_upvalue = &state.frame().closure.upvalues[slot_index as usize];
+                            let enclosing_upvalue =
+                                &state.frame().closure.upvalues[slot_index as usize];
                             upvalues.push(enclosing_upvalue.clone())
                         }
                     }
-                    state.locals.push(Value::from(Closure { function, upvalues }));
+                    state
+                        .value_stack
+                        .push(Value::from(Closure { function, upvalues }));
                 } else {
                     panic!("Expected function constant for OpCode::Closure instruction.");
                 }
@@ -356,14 +361,34 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::GetUpvalue => {
                 let upvalue_slot = read_byte(state);
                 let upvalue = &state.frame().closure.upvalues[upvalue_slot as usize];
-                let cloned_val = state.locals[upvalue.raw_index].clone();
-                state.locals.push(cloned_val);
+                // determine whether the upvalue is closed (RefCell on the heap) or still open (index on the stack)
+                let cloned_val = if let Some(value) = upvalue.closed.borrow().as_ref() {
+                    value.clone()
+                } else {
+                    state.value_stack[upvalue.stack_index].clone()
+                };
+                state.value_stack.push(cloned_val);
             }
             OpCode::SetUpvalue => {
+                let new_value = state.value_stack.last().unwrap().clone();
                 let upvalue_slot = read_byte(state);
-                let upvalue_location = state.frame().closure.upvalues[upvalue_slot as usize].raw_index;
-                let new_value = state.locals.last().unwrap().clone();
-                state.locals[upvalue_location] = new_value;
+                let upvalue = &state.frame().closure.upvalues[upvalue_slot as usize];
+                // determine whether the upvalue is closed (RefCell on the heap) or still open (index on the stack)
+                if upvalue.closed.borrow().is_none() {
+                    let stack_location = upvalue.stack_index;
+                    state.value_stack[stack_location] = new_value;
+                } else {
+                    *upvalue.closed.borrow_mut() = Some(new_value);
+                }
+            }
+            OpCode::CloseUpvalue => {
+                let stack_index = state.value_stack.len() - 1;
+                let value = state.value_stack.pop().unwrap();
+                let upvalue_closed = close_upvalue(state, stack_index, value);
+                // for troubleshooting
+                if !upvalue_closed {
+                    panic!("CloseUpvalue instruction did not find open upvalue")
+                }
             }
         }
     }
@@ -420,7 +445,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             }
 
             // this should point to the location of the callee on the stack, arguments will begin in slot 1 relative to this base pointer
-            let locals_base = state.locals.len() - (arg_count as usize) - 1;
+            let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
 
             state.call_stack.push(CallFrame {
                 ip: 0,
@@ -439,13 +464,15 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
                 ));
             }
 
-            let args_begin = state.locals.len() - (arg_count as usize);
-            let args = &state.locals[args_begin..state.locals.len()];
+            let args_begin = state.value_stack.len() - (arg_count as usize);
+            let args = &state.value_stack[args_begin..state.value_stack.len()];
             let result = (native_function.func)(args);
 
             // make sure to pop the native function callable itself which is the entry before the first argument
-            state.locals.drain((args_begin - 1)..state.locals.len());
-            state.locals.push(result);
+            state
+                .value_stack
+                .drain((args_begin - 1)..state.value_stack.len());
+            state.value_stack.push(result);
         }
         _ => {
             return Err(build_error(
@@ -455,6 +482,52 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         }
     }
     Ok(())
+}
+
+fn create_upvalue(state: &mut State, stack_index: usize) -> Rc<Upvalue> {
+    let upvalue = Rc::new(Upvalue {
+        stack_index,
+        closed: RefCell::new(None),
+    });
+    state.open_upvalues.push(upvalue.clone());
+    upvalue
+}
+
+// returns true if matching upvalue was closed, false if not found
+fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
+    // TODO: will the upvalue to close always be at the end of the list?
+    let position_rev = state
+        .open_upvalues
+        .iter()
+        .rev()
+        .position(|upvalue| upvalue.stack_index == stack_index);
+    if let Some(position_rev) = position_rev {
+        let position = (state.open_upvalues.len() - 1) - position_rev;
+        let upvalue = state.open_upvalues.remove(position);
+        if DEBUG_TRACING {
+            let other_refs = Rc::strong_count(&upvalue) - 1;
+            println!("Closing upvalue with {other_refs} remaining references.");
+        }
+        *upvalue.closed.borrow_mut() = Some(value);
+        true
+    } else {
+        false
+    }
+}
+
+// remove all entries at and above stack_index_begin, and close any corresponding upvalues
+fn pop_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
+    let end = state.value_stack.len();
+    let popped_values_rev: Vec<Value> = state
+        .value_stack
+        .drain(stack_index_begin..end)
+        .rev()
+        .collect();
+    let mut stack_index_rev = (stack_index_begin..end).rev();
+    for value in popped_values_rev {
+        // TODO: this can be optimized by stopping as soon as a lower stack index is reached in the upvalue reverse list search
+        close_upvalue(state, stack_index_rev.next().unwrap(), value);
+    }
 }
 
 fn print_stack(stack: &Vec<Value>) {

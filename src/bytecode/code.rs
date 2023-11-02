@@ -1,4 +1,5 @@
 use core::panic;
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -32,9 +33,10 @@ pub enum OpCode {
     Closure,
     GetUpvalue,
     SetUpvalue,
+    CloseUpvalue,
 }
 
-const OP_TABLE: [OpCode; 28] = [
+const OP_TABLE: [OpCode; 29] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -63,6 +65,7 @@ const OP_TABLE: [OpCode; 28] = [
     OpCode::Closure,
     OpCode::GetUpvalue,
     OpCode::SetUpvalue,
+    OpCode::CloseUpvalue,
 ];
 
 impl From<u8> for OpCode {
@@ -78,7 +81,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Function(Rc<Function>), // compile time representation of a function
-    Closure(Rc<Closure>), // runtime-only representation of a function
+    Closure(Rc<Closure>),   // runtime-only representation of a function
     //Upvalue(Upvalue), // runtime-only representation of an upvalue
     NativeFunction(Rc<NativeFunction>),
 }
@@ -185,12 +188,13 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
     pub function: Rc<Function>,
-    pub upvalues: Vec<Upvalue>,
+    pub upvalues: Vec<Rc<Upvalue>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Upvalue {
-    pub raw_index: usize, // the location in the value_stack vector if this upvalue has not yet been closed
+    pub stack_index: usize, // the location in the value stack if this upvalue has not yet been closed
+    pub closed: RefCell<Option<Value>>, // the closed value once it has been moved to the heap
 }
 
 pub struct NativeFunction {
@@ -208,10 +212,10 @@ impl PartialEq for NativeFunction {
 impl fmt::Debug for NativeFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NativeFunction")
-         .field("arity", &self.arity)
-         .field("func", &"NATIVE_FUNCTION")
-         .field("name", &self.name)
-         .finish()
+            .field("arity", &self.arity)
+            .field("func", &"NATIVE_FUNCTION")
+            .field("name", &self.name)
+            .finish()
     }
 }
 
@@ -263,6 +267,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Closure => closure(chunk, offset),
         OpCode::GetUpvalue => byte_instruction("GetUpvalue", chunk, offset),
         OpCode::SetUpvalue => byte_instruction("SetUpvalue", chunk, offset),
+        OpCode::CloseUpvalue => simple_instruction("CloseUpvalue"),
     }
 }
 
