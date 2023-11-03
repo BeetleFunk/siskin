@@ -3,6 +3,8 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+const TRACE_VALUE_DROP: bool = false;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     Return,
@@ -82,7 +84,6 @@ pub enum Value {
     String(String),
     Function(Rc<Function>), // compile time representation of a function
     Closure(Rc<Closure>),   // runtime-only representation of a function
-    //Upvalue(Upvalue), // runtime-only representation of an upvalue
     NativeFunction(Rc<NativeFunction>),
 }
 
@@ -99,7 +100,6 @@ impl fmt::Display for Value {
                 Self::String(value) => value.clone(),
                 Self::Function(value) => value.name.clone(),
                 Self::Closure(value) => value.function.name.clone(),
-                //Self::Upvalue(value) => "upvalue ".to_owned() + &value.raw_index.to_string(),
                 Self::NativeFunction(value) => value.name.clone(),
             }
         )
@@ -189,6 +189,14 @@ pub struct Function {
 pub struct Closure {
     pub function: Rc<Function>,
     pub upvalues: Vec<Rc<Upvalue>>,
+}
+
+impl Drop for Closure {
+    fn drop(&mut self) {
+        if TRACE_VALUE_DROP {
+            println!("Dropping closure for function {} with {} upvalues", self.function.name, self.upvalues.len());
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

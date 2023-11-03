@@ -493,3 +493,34 @@ fn closure_variable_semantics() -> TestResult {
 
     Ok(())
 }
+
+// Using the Rc<RefCell<Value>> technique for moving upvalues to the heap does allow for ownership cycles that will never be cleaned up
+// The two closures inside the local scope will never be dropped for the lifetime of the VM because they reference each other via closed upvalue
+// To observe this, you can turn on drop tracing for closures
+#[test]
+fn create_ownership_cycle() -> TestResult {
+    let code = "\
+        print \"Entering local scope\";
+        {
+            var SomeFunc;
+            fun DoThing() {
+                return SomeFunc();
+            }
+            fun CaptureDoThing(condition) {
+                if (condition) {
+                    DoThing();
+                }
+                return condition;
+            }
+            // create the reference cycle after vars have been captured
+            SomeFunc = CaptureDoThing;
+        }
+        // with proper cycle detection (or tracing GC) it should be possible to drop those local closures at this point
+        print \"Exited local scope\";";
+
+    let output = run(code)?;
+
+    assert_eq!("Entering local scope\nExited local scope\n", output);
+
+    Ok(())
+}
