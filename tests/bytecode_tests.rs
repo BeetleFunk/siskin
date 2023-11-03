@@ -524,3 +524,20 @@ fn create_ownership_cycle() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn empty_class_definition() -> TestResult {
+    let code = "\
+        class EmptyClass {}
+        print EmptyClass;
+        {
+            class EmptyLocalClass {}
+            print EmptyLocalClass;
+        }";
+
+    let output = run(code)?;
+
+    assert_eq!("EmptyClass\nEmptyLocalClass\n", output);
+
+    Ok(())
+}

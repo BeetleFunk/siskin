@@ -354,6 +354,8 @@ fn declaration(compiler: &mut Compiler) -> UnitResult {
         var_declaration(compiler)
     } else if compiler.advance_if_match(TokenType::Fun)? {
         fun_declaration(compiler)
+    } else if compiler.advance_if_match(TokenType::Class)? {
+        class_declaration(compiler)
     } else {
         statement(compiler)
     }
@@ -396,18 +398,23 @@ fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
         .clone();
 
     function(compiler, identifier.clone())?;
+    define_variable_no_replace(compiler, identifier)?;
 
+    Ok(())
+}
+
+fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> UnitResult {
     if compiler.scope_depth == 0 {
         let index = compiler
             .chunk_mut()
             .add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
         define_global(compiler, index)
     } else {
-        // unlike variables, functions are not allowed to shadow existing names
+        // unlike variables, functions and classes are not allowed to replace existing names within the same scope
         if compiler.identifier_in_current_scope(identifier.extract_name()) {
             return Err(build_error(
                 &format!(
-                    "Already a variable in scope matching the function name ({}).",
+                    "Already a variable in scope matching the function or class name ({}).",
                     identifier.extract_name()
                 ),
                 identifier.line,
@@ -416,7 +423,6 @@ fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
             compiler.add_local(identifier);
         }
     }
-
     Ok(())
 }
 
@@ -502,6 +508,25 @@ fn function_parameters(compiler: &mut Compiler) -> BasicResult<u8> {
             }
         }
     }
+}
+
+fn class_declaration(compiler: &mut Compiler) -> UnitResult {
+    let identifier = compiler
+        .consume(TokenType::Identifier, "Expect class name.")?
+        .clone();
+
+    let class_name_constant = compiler
+        .chunk_mut()
+        .add_constant(Value::from(identifier.extract_name().clone()));
+    compiler.emit_data_op(OpCode::Class, class_name_constant);
+
+    // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
+    define_variable_no_replace(compiler, identifier)?;
+    
+    compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+    compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+    Ok(())
 }
 
 fn define_global(compiler: &mut Compiler, index: u8) {

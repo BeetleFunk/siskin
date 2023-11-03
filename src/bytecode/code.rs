@@ -36,9 +36,10 @@ pub enum OpCode {
     GetUpvalue,
     SetUpvalue,
     CloseUpvalue,
+    Class,
 }
 
-const OP_TABLE: [OpCode; 29] = [
+const OP_TABLE: [OpCode; 30] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -68,6 +69,7 @@ const OP_TABLE: [OpCode; 29] = [
     OpCode::GetUpvalue,
     OpCode::SetUpvalue,
     OpCode::CloseUpvalue,
+    OpCode::Class,
 ];
 
 impl From<u8> for OpCode {
@@ -82,6 +84,7 @@ pub enum Value {
     Nil,
     Number(f64),
     String(String),
+    Class(Rc<Class>),
     Function(Rc<Function>), // compile time representation of a function
     Closure(Rc<Closure>),   // runtime-only representation of a function
     NativeFunction(Rc<NativeFunction>),
@@ -98,6 +101,7 @@ impl fmt::Display for Value {
                 Self::Number(value) => value.to_string(),
                 // TODO: avoid cloning strings for these cases
                 Self::String(value) => value.clone(),
+                Self::Class(value) => value.name.clone(),
                 Self::Function(value) => value.name.clone(),
                 Self::Closure(value) => value.function.name.clone(),
                 Self::NativeFunction(value) => value.name.clone(),
@@ -178,6 +182,11 @@ impl Chunk {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Class {
+    pub name: String,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Function {
     pub arity: u8,
     pub upvalue_count: u8,
@@ -185,7 +194,7 @@ pub struct Function {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Closure {
     pub function: Rc<Function>,
     pub upvalues: Vec<Rc<Upvalue>>,
@@ -199,7 +208,7 @@ impl Drop for Closure {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Upvalue {
     pub stack_index: usize, // the location in the value stack if this upvalue has not yet been closed
     pub closed: RefCell<Option<Value>>, // the closed value once it has been moved to the heap
@@ -276,6 +285,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::GetUpvalue => byte_instruction("GetUpvalue", chunk, offset),
         OpCode::SetUpvalue => byte_instruction("SetUpvalue", chunk, offset),
         OpCode::CloseUpvalue => simple_instruction("CloseUpvalue"),
+        OpCode::Class => constant_instruction("Class", chunk, offset),
     }
 }
 

@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Closure, NativeFunction, OpCode, Upvalue, Value};
+use super::code::{self, Class, Closure, NativeFunction, OpCode, Upvalue, Value};
 use super::compiler;
 
 const DEBUG_TRACING: bool = true;
@@ -388,6 +388,16 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 // for troubleshooting
                 if !upvalue_closed {
                     panic!("CloseUpvalue instruction did not find open upvalue")
+                }
+            }
+            OpCode::Class => {
+                let class_name = read_constant(state);
+                if let Value::String(class_name) = class_name {
+                    state
+                        .value_stack
+                        .push(Value::Class(Rc::new(Class { name: class_name })))
+                } else {
+                    panic!("Expected string constant for OpCode::Class instruction.");
                 }
             }
         }
