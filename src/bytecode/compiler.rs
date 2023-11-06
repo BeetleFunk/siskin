@@ -293,7 +293,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::LeftBrace,      ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }), 
     (TokenType::RightBrace,     ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Comma,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
-    (TokenType::Dot,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::Dot,            ParseRule { prefix: None,           infix: Some(dot),       precedence: PREC_CALL }),
     (TokenType::Minus,          ParseRule { prefix: Some(unary),    infix: Some(binary),    precedence: PREC_TERM }),
     (TokenType::Plus,           ParseRule { prefix: None,           infix: Some(binary),    precedence: PREC_TERM }),
     (TokenType::Semicolon,      ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -811,6 +811,20 @@ fn grouping(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
 fn call(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     let arg_count = argument_list(compiler)?;
     compiler.emit_data_op(OpCode::Call, arg_count);
+    Ok(())
+}
+
+fn dot(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
+    let identifier = compiler.consume(TokenType::Identifier, "Expect property name after '.'.")?;
+    let property_name = identifier.extract_name().clone();
+    let property_name = compiler.chunk_mut().add_constant(Value::from(property_name));
+
+    if can_assign && compiler.advance_if_match(TokenType::Equal)? {
+        expression(compiler)?;
+        compiler.emit_data_op(OpCode::SetProperty, property_name);
+    } else {
+        compiler.emit_data_op(OpCode::GetProperty, property_name);
+    }
     Ok(())
 }
 

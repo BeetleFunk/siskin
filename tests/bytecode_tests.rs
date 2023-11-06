@@ -530,14 +530,48 @@ fn empty_class_definition() -> TestResult {
     let code = "\
         class EmptyClass {}
         print EmptyClass;
+        print EmptyClass();
         {
             class EmptyLocalClass {}
             print EmptyLocalClass;
+            print EmptyLocalClass();
         }";
 
     let output = run(code)?;
 
-    assert_eq!("EmptyClass\nEmptyLocalClass\n", output);
+    assert_eq!("EmptyClass\nEmptyClass instance\nEmptyLocalClass\nEmptyLocalClass instance\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn get_and_set_instance_fields() -> TestResult {
+    let code = "\
+        class Stuff {}
+
+        var thing = Stuff();
+        thing.first = 1;
+        thing.third = thing.second = 2;
+        print thing.first + thing.second + thing.third;";
+
+    let output = run(code)?;
+
+    assert_eq!("5\n", output);
+
+    Ok(())
+}
+
+#[test]
+fn get_undefined_field() -> TestResult {
+    let code = "\
+        class Stuff {}
+        var thing = Stuff();
+        thing.first = 1;
+        print thing.missing;";
+
+    let result = run(code);
+    let error = result.unwrap_err();
+    assert!(error.description.contains("Undefined property 'missing'"));
 
     Ok(())
 }

@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Class, Closure, NativeFunction, OpCode, Upvalue, Value};
+use super::code::{self, Class, Closure, Instance, NativeFunction, OpCode, Upvalue, Value};
 use super::compiler;
 
 const DEBUG_TRACING: bool = true;
@@ -257,41 +257,32 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 state.value_stack.pop();
             }
             OpCode::DefineGlobal => {
-                if let Value::String(name) = read_constant(state) {
-                    let value = state.value_stack.pop().unwrap();
-                    state.globals.insert(name, value);
-                } else {
-                    panic!("DefineGlobal must have a string constant for the variable name.");
-                }
+                let name = read_string_constant(state);
+                let value = state.value_stack.pop().unwrap();
+                state.globals.insert(name, value);
             }
             OpCode::GetGlobal => {
-                if let Value::String(name) = read_constant(state) {
-                    if let Some(value) = state.globals.get(&name) {
-                        state.value_stack.push(value.clone());
-                    } else {
-                        return Err(build_error(
-                            &format!("Undefined variable {name}."),
-                            last_line_number(state),
-                        ));
-                    }
+                let name = read_string_constant(state);
+                if let Some(value) = state.globals.get(&name) {
+                    state.value_stack.push(value.clone());
                 } else {
-                    panic!("LoadGlobal must have a string constant for the variable name.");
+                    return Err(build_error(
+                        &format!("Undefined variable {name}."),
+                        last_line_number(state),
+                    ));
                 }
             }
             OpCode::SetGlobal => {
-                if let Value::String(name) = read_constant(state) {
-                    let entry = state.globals.entry(name);
-                    if let std::collections::hash_map::Entry::Occupied(mut entry) = entry {
-                        // avoid popping the value off the stack here, assignment result should be propagated
-                        entry.insert(state.value_stack.last().unwrap().clone());
-                    } else {
-                        return Err(build_error(
-                            &format!("Undefined variable {}.", entry.key()),
-                            last_line_number(state),
-                        ));
-                    }
+                let name = read_string_constant(state);
+                let entry = state.globals.entry(name);
+                if let std::collections::hash_map::Entry::Occupied(mut entry) = entry {
+                    // avoid popping the value off the stack here, assignment result should be propagated
+                    entry.insert(state.value_stack.last().unwrap().clone());
                 } else {
-                    panic!("LoadGlobal must have a string constant for the variable name.");
+                    return Err(build_error(
+                        &format!("Undefined variable {}.", entry.key()),
+                        last_line_number(state),
+                    ));
                 }
             }
             OpCode::GetLocal => {
@@ -391,13 +382,42 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Class => {
-                let class_name = read_constant(state);
-                if let Value::String(class_name) = class_name {
-                    state
-                        .value_stack
-                        .push(Value::Class(Rc::new(Class { name: class_name })))
+                let class_name = read_string_constant(state);
+                state
+                    .value_stack
+                    .push(Value::from(Class { name: class_name }))
+            }
+            OpCode::GetProperty => {
+                let property_name = read_string_constant(state);
+                if let Value::Instance(instance) = state.value_stack.pop().unwrap() {
+                    if let Some(value) = instance.fields.borrow().get(&property_name) {
+                        state.value_stack.push(value.clone());
+                    } else {
+                        return Err(build_error(
+                            &format!("Undefined property '{}'.", property_name),
+                            last_line_number(state)
+                        ));
+                    }
                 } else {
-                    panic!("Expected string constant for OpCode::Class instruction.");
+                    return Err(build_error(
+                        "Property access only allowed for instances.",
+                        last_line_number(state)
+                    ));
+                }
+            }
+            OpCode::SetProperty => {
+                let property_name = read_string_constant(state);
+                // the value to set will be at the top of the stack and the instance will be the next entry after that
+                let property_value = state.value_stack.pop().unwrap();
+                if let Value::Instance(instance) = state.value_stack.pop().unwrap() {
+                    instance.fields.borrow_mut().insert(property_name, property_value.clone());
+                    // leave the value on top of the stack (the result of an assignment expression can be used by another expression)
+                    state.value_stack.push(property_value);
+                } else {
+                    return Err(build_error(
+                        "Property access only allowed for instances.",
+                        last_line_number(state)
+                    ));
                 }
             }
         }
@@ -429,6 +449,15 @@ fn read_constant(state: &mut State) -> Value {
 
     // TODO: need to clone this?
     value.clone()
+}
+
+fn read_string_constant(state: &mut State) -> String {
+    let value = read_constant(state);
+    if let Value::String(string_value) = value {
+        string_value
+    } else {
+        panic!("Expected string value in the constant table.");
+    }
 }
 
 fn pop_binary_operands(stack: &mut Vec<Value>) -> (Value, Value) {
@@ -483,6 +512,22 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
                 .value_stack
                 .drain((args_begin - 1)..state.value_stack.len());
             state.value_stack.push(result);
+        }
+        Value::Class(class) => {
+            if arg_count != 0 {
+                return Err(build_error(
+                    "Constructor arguments not yet supported.",
+                    last_line_number(state),
+                ));
+            }
+
+            let instance = Value::from(Instance {
+                class,
+                fields: RefCell::new(HashMap::new()),
+            });
+            // replace the class value on the stack with the newly created instance
+            let callee_location = state.value_stack.len() - (arg_count as usize) - 1;
+            state.value_stack[callee_location] = instance;
         }
         _ => {
             return Err(build_error(

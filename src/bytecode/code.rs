@@ -1,9 +1,10 @@
 use core::panic;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-const TRACE_VALUE_DROP: bool = false;
+const TRACE_VALUE_DROP: bool = true;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
@@ -37,9 +38,11 @@ pub enum OpCode {
     SetUpvalue,
     CloseUpvalue,
     Class,
+    GetProperty,
+    SetProperty,
 }
 
-const OP_TABLE: [OpCode; 30] = [
+const OP_TABLE: [OpCode; 32] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -70,6 +73,8 @@ const OP_TABLE: [OpCode; 30] = [
     OpCode::SetUpvalue,
     OpCode::CloseUpvalue,
     OpCode::Class,
+    OpCode::GetProperty,
+    OpCode::SetProperty,
 ];
 
 impl From<u8> for OpCode {
@@ -85,6 +90,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Class(Rc<Class>),
+    Instance(Rc<Instance>),
     Function(Rc<Function>), // compile time representation of a function
     Closure(Rc<Closure>),   // runtime-only representation of a function
     NativeFunction(Rc<NativeFunction>),
@@ -102,6 +108,7 @@ impl fmt::Display for Value {
                 // TODO: avoid cloning strings for these cases
                 Self::String(value) => value.clone(),
                 Self::Class(value) => value.name.clone(),
+                Self::Instance(value) => value.class.name.clone() + " instance",
                 Self::Function(value) => value.name.clone(),
                 Self::Closure(value) => value.function.name.clone(),
                 Self::NativeFunction(value) => value.name.clone(),
@@ -125,6 +132,18 @@ impl From<f64> for Value {
 impl From<String> for Value {
     fn from(string: String) -> Value {
         Value::String(string)
+    }
+}
+
+impl From<Class> for Value {
+    fn from(class: Class) -> Value {
+        Value::Class(Rc::new(class))
+    }
+}
+
+impl From<Instance> for Value {
+    fn from(instance: Instance) -> Value {
+        Value::Instance(Rc::new(instance))
     }
 }
 
@@ -187,6 +206,12 @@ pub struct Class {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Instance {
+    pub class: Rc<Class>,
+    pub fields: RefCell<HashMap<String, Value>>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Function {
     pub arity: u8,
     pub upvalue_count: u8,
@@ -198,14 +223,6 @@ pub struct Function {
 pub struct Closure {
     pub function: Rc<Function>,
     pub upvalues: Vec<Rc<Upvalue>>,
-}
-
-impl Drop for Closure {
-    fn drop(&mut self) {
-        if TRACE_VALUE_DROP {
-            println!("Dropping closure for function {} with {} upvalues", self.function.name, self.upvalues.len());
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -286,6 +303,8 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::SetUpvalue => byte_instruction("SetUpvalue", chunk, offset),
         OpCode::CloseUpvalue => simple_instruction("CloseUpvalue"),
         OpCode::Class => constant_instruction("Class", chunk, offset),
+        OpCode::GetProperty => constant_instruction("GetProperty", chunk, offset),
+        OpCode::SetProperty => constant_instruction("SetProperty", chunk, offset),
     }
 }
 
@@ -338,5 +357,31 @@ fn closure(chunk: &Chunk, offset: usize) -> usize {
         2 + (2 * (function.upvalue_count as usize))
     } else {
         panic!("Unexpected value for closure")
+    }
+}
+
+// Drop tracing stuff for garbage collected value types
+
+impl Drop for Class {
+    fn drop(&mut self) {
+        if TRACE_VALUE_DROP {
+            println!("Dropping class {}", self.name);
+        }
+    }
+}
+
+impl Drop for Instance {
+    fn drop(&mut self) {
+        if TRACE_VALUE_DROP {
+            println!("Dropping instance of {} with {} fields", self.class.name, self.fields.borrow().len());
+        }
+    }
+}
+
+impl Drop for Closure {
+    fn drop(&mut self) {
+        if TRACE_VALUE_DROP {
+            println!("Dropping closure for function {} with {} upvalues", self.function.name, self.upvalues.len());
+        }
     }
 }
