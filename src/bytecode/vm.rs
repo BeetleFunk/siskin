@@ -376,7 +376,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 let stack_index = state.value_stack.len() - 1;
                 let value = state.value_stack.pop().unwrap();
                 let upvalue_closed = close_upvalue(state, stack_index, value);
-                // for troubleshooting
+                // for sanity checking and troubleshooting
                 if !upvalue_closed {
                     panic!("CloseUpvalue instruction did not find open upvalue")
                 }

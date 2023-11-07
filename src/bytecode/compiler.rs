@@ -254,12 +254,12 @@ impl Compiler {
         }
     }
 
-    fn identifier_in_current_scope(&self, name: &str) -> bool {
+    fn identifier_in_current_scope(&self, identifier_name: &str) -> bool {
         for local in self.func().locals.iter().rev() {
             // locals are always added in order of scope depth, so we can bail as soon as we hit one at a lower depth
             if local.depth != self.scope_depth {
                 return false;
-            } else if local.name.lexeme == name {
+            } else if local.name.lexeme == identifier_name {
                 return true;
             }
         }
@@ -382,7 +382,7 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
         // for global vars, save the variable name as a string in the constant table
         let index = compiler
             .chunk_mut()
-            .add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
+            .add_constant(Value::from(identifier.into_name()));
         define_global(compiler, index);
     } else {
         // for local vars, add the identifier name to the list of locals
@@ -407,7 +407,7 @@ fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> Uni
     if compiler.scope_depth == 0 {
         let index = compiler
             .chunk_mut()
-            .add_constant(Value::from(identifier.extract_name().clone())); // TODO: how to avoid the clone here?
+            .add_constant(Value::from(identifier.into_name()));
         define_global(compiler, index)
     } else {
         // unlike variables, functions and classes are not allowed to replace existing names within the same scope
@@ -490,9 +490,9 @@ fn function_parameters(compiler: &mut Compiler) -> BasicResult<u8> {
                 .consume(TokenType::Identifier, "Expect parameter name.")?
                 .clone();
             // prevent duplicate parameter names on a function
-            if compiler.identifier_in_current_scope(&identifier.lexeme) {
+            if compiler.identifier_in_current_scope(identifier.extract_name()) {
                 return Err(build_error(
-                    &format!("Duplicate parameter name ({}).", &identifier.lexeme),
+                    &format!("Duplicate parameter name ({}).", identifier.extract_name()),
                     identifier.line,
                 ));
             } else if arity == u8::MAX {
@@ -517,17 +517,27 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
 
     let class_name_constant = compiler
         .chunk_mut()
-        .add_constant(Value::from(identifier.extract_name().clone()));
+        .add_constant(Value::from(identifier.clone().into_name()));
     compiler.emit_data_op(OpCode::Class, class_name_constant);
 
     // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
     define_variable_no_replace(compiler, identifier)?;
-    
-    compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
-    compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
 
+    compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+    // while compiler.parser.current.token_type != TokenType::RightBrace && compiler.parser.current.token_type != TokenType::Eof {
+    //     method(compiler);
+    // }
+    compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
     Ok(())
 }
+
+// fn method(compiler: &mut Compiler) -> UnitResult {
+//     let identifier = compiler
+//         .consume(TokenType::Identifier, "Expect class name.")?;
+
+//     let constant = compiler.chunk_mut().add_constant(Value::from(identifier.extract_name().clone()));
+//     Ok(())
+// }
 
 fn define_global(compiler: &mut Compiler, index: u8) {
     compiler.emit_data_op(OpCode::DefineGlobal, index);
@@ -750,14 +760,14 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
 }
 
 fn string(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    let value = compiler.parser.previous.extract_string().clone().into();
+    let value = Value::from(compiler.parser.previous.extract_string().clone());
     let address = compiler.chunk_mut().add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
 fn number(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    let value = compiler.parser.previous.extract_number().into();
+    let value = Value::from(compiler.parser.previous.extract_number());
     let address = compiler.chunk_mut().add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
@@ -817,7 +827,9 @@ fn call(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
 fn dot(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
     let identifier = compiler.consume(TokenType::Identifier, "Expect property name after '.'.")?;
     let property_name = identifier.extract_name().clone();
-    let property_name = compiler.chunk_mut().add_constant(Value::from(property_name));
+    let property_name = compiler
+        .chunk_mut()
+        .add_constant(Value::from(property_name));
 
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
         expression(compiler)?;

@@ -203,6 +203,7 @@ impl Chunk {
 #[derive(Debug, PartialEq)]
 pub struct Class {
     pub name: String,
+    //pub methods: HashMap<String, Closure>
 }
 
 #[derive(Debug, PartialEq)]

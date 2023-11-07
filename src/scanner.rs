@@ -91,6 +91,18 @@ impl Token {
         }
     }
 
+    pub fn into_name(self) -> String {
+        if matches!(self.token_type, TokenType::Identifier) {
+            if let Some(TokenValue::Name(value)) = self.token_value {
+                value
+            } else {
+                panic!("Identifier token did not have a name value");
+            }
+        } else {
+            panic!("Called into_name on non-identifier token");
+        }
+    }
+
     pub fn extract_name(&self) -> &String {
         if matches!(self.token_type, TokenType::Identifier) {
             if let Some(TokenValue::Name(value)) = &self.token_value {
