@@ -10,6 +10,8 @@ type UnitResult = BasicResult<()>;
 
 const DEBUG_DUMP_CHUNK: bool = true;
 
+const NAME_FOR_SELF: &str = "this";
+
 struct Parser {
     scanner: Scanner,
     current: Token,
@@ -61,6 +63,7 @@ struct Compiler {
     parser: Parser,
     func_stack: Vec<CompilerFunction>,
     scope_depth: u32,
+    class_depth: u32, // zero if not inside a definition
 }
 
 impl Compiler {
@@ -80,6 +83,7 @@ impl Compiler {
                 upvalues: Vec::new(),
             }],
             scope_depth: 0,
+            class_depth: 0,
         }
     }
 
@@ -322,7 +326,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::Print,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Return,         ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Super,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
-    (TokenType::This,           ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::This,           ParseRule { prefix: Some(this),     infix: None,            precedence: PREC_NONE }),
     (TokenType::True,           ParseRule { prefix: Some(literal),  infix: None,            precedence: PREC_NONE }),
     (TokenType::Var,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::While,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -452,7 +456,7 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
         // the free function calling convention has the callee in local slot zero
         FunctionType::FreeFunction => compiler.add_local(name),
         // the class method calling convention has the object instance in local slot zero
-        FunctionType::ClassMethod => compiler.add_local("this".to_owned()),
+        FunctionType::ClassMethod => compiler.add_local(NAME_FOR_SELF.to_owned()),
     }
 
     let arity = function_parameters(compiler)?;
@@ -532,6 +536,7 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
     define_variable_no_replace(compiler, identifier.clone())?;
 
+    compiler.class_depth += 1;
     compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
 
     // load the class onto the top of the stack for following method assignment instructions
@@ -544,6 +549,8 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     compiler.emit_op(OpCode::Pop);
 
     compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+    compiler.class_depth -= 1;
+
     Ok(())
 }
 
@@ -804,6 +811,18 @@ fn literal(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
             compiler.parser.previous.line
         ),
     }
+    Ok(())
+}
+
+// kinda like a special variable name that cannot be assigned to and is only valid inside of a method definition
+fn this(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    if compiler.class_depth == 0 {
+        return Err(build_error(
+            "Can't use 'this' outside of a class.",
+            compiler.parser.previous.line,
+        ));
+    }
+    load_named_variable(compiler, NAME_FOR_SELF);
     Ok(())
 }
 

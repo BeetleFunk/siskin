@@ -598,3 +598,94 @@ fn class_with_methods() -> TestResult {
     assert_eq!("flap 1\nflap 2\nflap 3\n", output);
     Ok(())
 }
+
+#[test]
+fn method_referencing_own_class() -> TestResult {
+    let code = "\
+        var first;
+        {
+            class CoolThing {
+                makeAnother() {
+                    var result = CoolThing();
+                    result.name = \"another!\";
+                    return result;
+                }
+            }
+            first = CoolThing();
+            first.name = \"original!\";
+        }
+        var second = first.makeAnother();
+        print first.name;
+        print second.name;";
+
+    let output = run(code)?;
+    assert_eq!("original!\nanother!\n", output);
+    Ok(())
+}
+
+#[test]
+fn this_expression() -> TestResult {
+    let code = "\
+        class ValueAdder {
+            compute(input) {
+                return input + this.value;
+            }
+        }
+        var adder = ValueAdder();
+        adder.value = 5;
+        print adder.compute(10);";
+
+    let output = run(code)?;
+    assert_eq!("15\n", output);
+    Ok(())
+}
+
+#[test]
+fn invalid_this_expression() -> TestResult {
+    {
+        let code = "print this;";
+        let result = run(code);
+        let error = result.unwrap_err();
+        assert!(error
+            .description
+            .contains("Can't use 'this' outside of a class"));
+    }
+    {
+        let code = "\
+            fun test() {
+                this = 5;
+            }";
+        let result = run(code);
+        let error = result.unwrap_err();
+        assert!(error
+            .description
+            .contains("Can't use 'this' outside of a class"));
+    }
+    Ok(())
+}
+
+#[test]
+fn method_recursion() -> TestResult {
+    let code = "\
+        class Factorial {
+            compute(input) {
+                this.accumulator = 1;
+                return this.internal(input);
+            }
+
+            internal(input) {
+                this.accumulator = this.accumulator * input;
+                if (input > 1) {
+                    return this.internal(input - 1);
+                } else {
+                    return this.accumulator;
+                }
+            }
+        }
+        var factorial = Factorial();
+        print factorial.compute(6);";
+
+    let output = run(code)?;
+    assert_eq!("720\n", output);
+    Ok(())
+}
