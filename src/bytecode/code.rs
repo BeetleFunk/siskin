@@ -40,9 +40,10 @@ pub enum OpCode {
     Class,
     GetProperty,
     SetProperty,
+    Method,
 }
 
-const OP_TABLE: [OpCode; 32] = [
+const OP_TABLE: [OpCode; 33] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -75,6 +76,7 @@ const OP_TABLE: [OpCode; 32] = [
     OpCode::Class,
     OpCode::GetProperty,
     OpCode::SetProperty,
+    OpCode::Method,
 ];
 
 impl From<u8> for OpCode {
@@ -91,8 +93,9 @@ pub enum Value {
     String(String),
     Class(Rc<Class>),
     Instance(Rc<Instance>),
-    Function(Rc<Function>), // compile time representation of a function
-    Closure(Rc<Closure>),   // runtime-only representation of a function
+    BoundMethod(Rc<BoundMethod>), // runtime-only representation of a class method bound to an instance
+    Function(Rc<Function>),       // compile time representation of a function or method
+    Closure(Rc<Closure>), // runtime-only representation of a function (may have captured variables)
     NativeFunction(Rc<NativeFunction>),
 }
 
@@ -109,6 +112,7 @@ impl fmt::Display for Value {
                 Self::String(value) => value.clone(),
                 Self::Class(value) => value.name.clone(),
                 Self::Instance(value) => value.class.name.clone() + " instance",
+                Self::BoundMethod(value) => format!("{} bound to instance of {}", value.closure.function.name, value.instance.class.name),
                 Self::Function(value) => value.name.clone(),
                 Self::Closure(value) => value.function.name.clone(),
                 Self::NativeFunction(value) => value.name.clone(),
@@ -144,6 +148,12 @@ impl From<Class> for Value {
 impl From<Instance> for Value {
     fn from(instance: Instance) -> Value {
         Value::Instance(Rc::new(instance))
+    }
+}
+
+impl From<BoundMethod> for Value {
+    fn from(method: BoundMethod) -> Value {
+        Value::BoundMethod(Rc::new(method))
     }
 }
 
@@ -203,13 +213,19 @@ impl Chunk {
 #[derive(Debug, PartialEq)]
 pub struct Class {
     pub name: String,
-    //pub methods: HashMap<String, Closure>
+    pub methods: RefCell<HashMap<String, Rc<Closure>>>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Instance {
     pub class: Rc<Class>,
     pub fields: RefCell<HashMap<String, Value>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct BoundMethod {
+    pub instance: Rc<Instance>,
+    pub closure: Rc<Closure>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -306,6 +322,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Class => constant_instruction("Class", chunk, offset),
         OpCode::GetProperty => constant_instruction("GetProperty", chunk, offset),
         OpCode::SetProperty => constant_instruction("SetProperty", chunk, offset),
+        OpCode::Method => constant_instruction("Method", chunk, offset),
     }
 }
 
@@ -366,7 +383,11 @@ fn closure(chunk: &Chunk, offset: usize) -> usize {
 impl Drop for Class {
     fn drop(&mut self) {
         if TRACE_VALUE_DROP {
-            println!("Dropping class {}", self.name);
+            println!(
+                "Dropping class {} with {} methods.",
+                self.name,
+                self.methods.borrow().len()
+            );
         }
     }
 }
@@ -374,7 +395,11 @@ impl Drop for Class {
 impl Drop for Instance {
     fn drop(&mut self) {
         if TRACE_VALUE_DROP {
-            println!("Dropping instance of {} with {} fields", self.class.name, self.fields.borrow().len());
+            println!(
+                "Dropping instance of {} with {} fields",
+                self.class.name,
+                self.fields.borrow().len()
+            );
         }
     }
 }
@@ -382,7 +407,11 @@ impl Drop for Instance {
 impl Drop for Closure {
     fn drop(&mut self) {
         if TRACE_VALUE_DROP {
-            println!("Dropping closure for function {} with {} upvalues", self.function.name, self.upvalues.len());
+            println!(
+                "Dropping closure for function {} with {} upvalues",
+                self.function.name,
+                self.upvalues.len()
+            );
         }
     }
 }

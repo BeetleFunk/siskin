@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Class, Closure, Instance, NativeFunction, OpCode, Upvalue, Value};
+use super::code::{self, Class, Closure, Instance, NativeFunction, OpCode, Upvalue, Value, BoundMethod};
 use super::compiler;
 
 const DEBUG_TRACING: bool = true;
@@ -60,6 +60,11 @@ fn create_globals() -> HashMap<String, Value> {
             func: native_sqrt,
             name: "sqrt".to_string(),
         },
+        NativeFunction {
+            arity: 1,
+            func: native_to_string,
+            name: "toString".to_string(),
+        },
     ];
 
     // add standard library native functions into the globals
@@ -78,16 +83,16 @@ fn native_clock(_args: &[Value]) -> Value {
 }
 
 fn native_sqrt(args: &[Value]) -> Value {
-    if args.len() != 1 {
-        panic!("Native function invoked with incorrect arg count.");
-    }
-
     if let Value::Number(value) = args[0] {
         value.sqrt().into()
     } else {
         // TODO: runtime errors from native functions
         panic!("Expected number argument in sqrt function.");
     }
+}
+
+fn native_to_string(args: &[Value]) -> Value {
+    Value::from(args[0].to_string())
 }
 
 struct CallFrame {
@@ -383,25 +388,30 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Class => {
                 let class_name = read_string_constant(state);
-                state
-                    .value_stack
-                    .push(Value::from(Class { name: class_name }))
+                state.value_stack.push(Value::from(Class {
+                    name: class_name,
+                    methods: RefCell::new(HashMap::new()),
+                }))
             }
             OpCode::GetProperty => {
                 let property_name = read_string_constant(state);
+                // fields take precedence over and can shadow class methods
                 if let Value::Instance(instance) = state.value_stack.pop().unwrap() {
-                    if let Some(value) = instance.fields.borrow().get(&property_name) {
-                        state.value_stack.push(value.clone());
+                    if let Some(field_value) = instance.fields.borrow().get(&property_name) {
+                        state.value_stack.push(field_value.clone());
+                    } else if let Some(closure) = instance.class.methods.borrow().get(&property_name) {
+                        let bound_method = BoundMethod { instance: instance.clone(), closure: closure.clone() };
+                        state.value_stack.push(Value::from(bound_method));
                     } else {
                         return Err(build_error(
                             &format!("Undefined property '{}'.", property_name),
-                            last_line_number(state)
+                            last_line_number(state),
                         ));
                     }
                 } else {
                     return Err(build_error(
                         "Property access only allowed for instances.",
-                        last_line_number(state)
+                        last_line_number(state),
                     ));
                 }
             }
@@ -410,14 +420,30 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 // the value to set will be at the top of the stack and the instance will be the next entry after that
                 let property_value = state.value_stack.pop().unwrap();
                 if let Value::Instance(instance) = state.value_stack.pop().unwrap() {
-                    instance.fields.borrow_mut().insert(property_name, property_value.clone());
+                    instance
+                        .fields
+                        .borrow_mut()
+                        .insert(property_name, property_value.clone());
                     // leave the value on top of the stack (the result of an assignment expression can be used by another expression)
                     state.value_stack.push(property_value);
                 } else {
                     return Err(build_error(
                         "Property access only allowed for instances.",
-                        last_line_number(state)
+                        last_line_number(state),
                     ));
+                }
+            }
+            OpCode::Method => {
+                let name = read_string_constant(state);
+                let method = if let Value::Closure(closure) = state.value_stack.pop().unwrap() {
+                    closure
+                } else {
+                    panic!("Method instruction expects a closure type value to be on top of the stack.");
+                };
+                if let Value::Class(class) = state.value_stack.last().unwrap() {
+                    class.methods.borrow_mut().insert(name, method);
+                } else {
+                    panic!("The target class must be on the value stack for method creation.");
                 }
             }
         }
@@ -472,6 +498,28 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
     }
 
     match callee {
+        Value::BoundMethod(method) => {
+            if method.closure.function.arity != arg_count {
+                return Err(build_error(
+                    &format!(
+                        "Expected {} arguments but received {}.",
+                        method.closure.function.arity, arg_count
+                    ),
+                    last_line_number(state),
+                ));
+            }
+
+            // this should point to the current location of the callee on the stack, arguments will begin in slot 1 relative to this base pointer
+            let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
+            // rewrite local slot zero with the value of the bound method instance, used when referencing 'this' in function body
+            state.value_stack[locals_base] = Value::Instance(method.instance.clone());
+
+            state.call_stack.push(CallFrame {
+                ip: 0,
+                locals_base,
+                closure: method.closure.clone(),
+            })
+        }
         Value::Closure(closure) => {
             if closure.function.arity != arg_count {
                 return Err(build_error(

@@ -395,10 +395,12 @@ fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
     let identifier = compiler
         .consume(TokenType::Identifier, "Expect function name.")?
         .clone();
-
-    function(compiler, identifier.extract_name().clone())?;
+    function(
+        compiler,
+        identifier.extract_name().clone(),
+        FunctionType::FreeFunction,
+    )?;
     define_variable_no_replace(compiler, identifier)?;
-
     Ok(())
 }
 
@@ -425,7 +427,12 @@ fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> Uni
     Ok(())
 }
 
-fn function(compiler: &mut Compiler, name: String) -> UnitResult {
+enum FunctionType {
+    FreeFunction,
+    ClassMethod,
+}
+
+fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
     compiler.func_stack.push(CompilerFunction {
@@ -441,8 +448,12 @@ fn function(compiler: &mut Compiler, name: String) -> UnitResult {
 
     compiler.begin_scope();
 
-    // the function calling convention always has the callee in local slot zero
-    compiler.add_local(name);
+    match function_type {
+        // the free function calling convention has the callee in local slot zero
+        FunctionType::FreeFunction => compiler.add_local(name),
+        // the class method calling convention has the object instance in local slot zero
+        FunctionType::ClassMethod => compiler.add_local("this".to_owned()),
+    }
 
     let arity = function_parameters(compiler)?;
     compiler.func_mut().definition.arity = arity;
@@ -456,7 +467,7 @@ fn function(compiler: &mut Compiler, name: String) -> UnitResult {
     block(compiler)?;
     emit_empty_return(compiler);
 
-    // TODO: figure out a cleaner way to do this, don't need to clean up function locals but do need to reset scope depth
+    // TODO: figure out a cleaner way to do this, don't need to clean up function locals (return does that) but do need to reset scope depth
     compiler.end_scope_no_emit();
 
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
@@ -513,30 +524,41 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     let identifier = compiler
         .consume(TokenType::Identifier, "Expect class name.")?
         .clone();
-
     let class_name_constant = compiler
         .chunk_mut()
-        .add_constant(Value::from(identifier.clone().into_name()));
+        .add_constant(Value::from(identifier.extract_name().clone()));
     compiler.emit_data_op(OpCode::Class, class_name_constant);
 
     // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
-    define_variable_no_replace(compiler, identifier)?;
+    define_variable_no_replace(compiler, identifier.clone())?;
 
     compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
-    // while compiler.parser.current.token_type != TokenType::RightBrace && compiler.parser.current.token_type != TokenType::Eof {
-    //     method(compiler);
-    // }
+
+    // load the class onto the top of the stack for following method assignment instructions
+    load_named_variable(compiler, &identifier.into_name());
+    while compiler.parser.current.token_type != TokenType::RightBrace
+        && compiler.parser.current.token_type != TokenType::Eof
+    {
+        method(compiler)?;
+    }
+    compiler.emit_op(OpCode::Pop);
+
     compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
     Ok(())
 }
 
-// fn method(compiler: &mut Compiler) -> UnitResult {
-//     let identifier = compiler
-//         .consume(TokenType::Identifier, "Expect class name.")?;
+fn method(compiler: &mut Compiler) -> UnitResult {
+    let method_name = compiler
+        .consume(TokenType::Identifier, "Expect class name.")?
+        .extract_name()
+        .clone();
 
-//     let constant = compiler.chunk_mut().add_constant(Value::from(identifier.extract_name().clone()));
-//     Ok(())
-// }
+    function(compiler, method_name.clone(), FunctionType::ClassMethod)?;
+
+    let name_constant = compiler.chunk_mut().add_constant(Value::from(method_name));
+    compiler.emit_data_op(OpCode::Method, name_constant);
+    Ok(())
+}
 
 fn define_global(compiler: &mut Compiler, index: u8) {
     compiler.emit_data_op(OpCode::DefineGlobal, index);
@@ -809,6 +831,23 @@ fn variable(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
         compiler.emit_data_op(opcodes.1, index);
     }
     Ok(())
+}
+
+// emit instruction to load the given variable name from local scope, upvalue, or global scope
+fn load_named_variable(compiler: &mut Compiler, name: &str) {
+    let (opcode, index) = if let Some(local_index) = compiler.resolve_local(name) {
+        (OpCode::GetLocal, local_index)
+    } else if let Some(upvalue_index) = compiler.resolve_upvalue(name) {
+        (OpCode::GetUpvalue, upvalue_index)
+    } else {
+        (
+            OpCode::GetGlobal,
+            compiler
+                .chunk_mut()
+                .add_constant(Value::from(name.to_string())),
+        )
+    };
+    compiler.emit_data_op(opcode, index);
 }
 
 fn grouping(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {

@@ -539,7 +539,10 @@ fn empty_class_definition() -> TestResult {
 
     let output = run(code)?;
 
-    assert_eq!("EmptyClass\nEmptyClass instance\nEmptyLocalClass\nEmptyLocalClass instance\n", output);
+    assert_eq!(
+        "EmptyClass\nEmptyClass instance\nEmptyLocalClass\nEmptyLocalClass instance\n",
+        output
+    );
 
     Ok(())
 }
@@ -573,5 +576,25 @@ fn get_undefined_field() -> TestResult {
     let error = result.unwrap_err();
     assert!(error.description.contains("Undefined property 'missing'"));
 
+    Ok(())
+}
+
+#[test]
+fn class_with_methods() -> TestResult {
+    let code = "\
+        class Bird {
+            flap(numberOfTimes) {
+                var i = 0;
+                while (i < numberOfTimes) {
+                    i = i + 1;
+                    print \"flap \" + toString(i);
+                }
+            }
+        }
+        var sparrow = Bird();
+        sparrow.flap(3);";
+
+    let output = run(code)?;
+    assert_eq!("flap 1\nflap 2\nflap 3\n", output);
     Ok(())
 }
