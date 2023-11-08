@@ -46,7 +46,7 @@ struct Upvalue {
 }
 
 struct Local {
-    name: Token,
+    name: String,
     depth: u32,
     is_captured: bool,
 }
@@ -165,7 +165,7 @@ impl Compiler {
         }
     }
 
-    fn add_local(&mut self, name: Token) {
+    fn add_local(&mut self, name: String) {
         if self.func().locals.len() >= u8::MAX.into() {
             panic!("Locals in scope limited to 256 entries at the moment.");
         }
@@ -189,7 +189,7 @@ impl Compiler {
             .iter()
             .enumerate()
             .rev()
-            .find(|entry| entry.1.name.lexeme == name)
+            .find(|entry| entry.1.name == name)
         {
             Some(match_index as u8)
         } else {
@@ -254,12 +254,12 @@ impl Compiler {
         }
     }
 
-    fn identifier_in_current_scope(&self, identifier_name: &str) -> bool {
+    fn identifier_in_current_scope(&self, name: &str) -> bool {
         for local in self.func().locals.iter().rev() {
             // locals are always added in order of scope depth, so we can bail as soon as we hit one at a lower depth
             if local.depth != self.scope_depth {
                 return false;
-            } else if local.name.lexeme == identifier_name {
+            } else if local.name == name {
                 return true;
             }
         }
@@ -364,6 +364,7 @@ fn declaration(compiler: &mut Compiler) -> UnitResult {
 fn var_declaration(compiler: &mut Compiler) -> UnitResult {
     let identifier = compiler
         .consume(TokenType::Identifier, "Expect variable name.")?
+        .extract_name()
         .clone();
 
     // compile the expression before adding the local variable entry, this makes variable shadowing work properly
@@ -380,9 +381,7 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
 
     if compiler.scope_depth == 0 {
         // for global vars, save the variable name as a string in the constant table
-        let index = compiler
-            .chunk_mut()
-            .add_constant(Value::from(identifier.into_name()));
+        let index = compiler.chunk_mut().add_constant(Value::from(identifier));
         define_global(compiler, index);
     } else {
         // for local vars, add the identifier name to the list of locals
@@ -397,7 +396,7 @@ fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
         .consume(TokenType::Identifier, "Expect function name.")?
         .clone();
 
-    function(compiler, identifier.clone())?;
+    function(compiler, identifier.extract_name().clone())?;
     define_variable_no_replace(compiler, identifier)?;
 
     Ok(())
@@ -420,13 +419,13 @@ fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> Uni
                 identifier.line,
             ));
         } else {
-            compiler.add_local(identifier);
+            compiler.add_local(identifier.into_name());
         }
     }
     Ok(())
 }
 
-fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
+fn function(compiler: &mut Compiler, name: String) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
     compiler.func_stack.push(CompilerFunction {
@@ -434,7 +433,7 @@ fn function(compiler: &mut Compiler, name: Token) -> UnitResult {
             arity: 0,
             upvalue_count: 0,
             chunk: Chunk::new(),
-            name: name.extract_name().clone(),
+            name: name.clone(),
         },
         locals: Vec::new(),
         upvalues: Vec::new(),
@@ -501,7 +500,7 @@ fn function_parameters(compiler: &mut Compiler) -> BasicResult<u8> {
                     identifier.line,
                 ));
             }
-            compiler.add_local(identifier);
+            compiler.add_local(identifier.into_name());
             arity += 1;
             if !compiler.advance_if_match(TokenType::Comma)? {
                 return Ok(arity);
