@@ -8,7 +8,9 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{self, Class, Closure, Instance, NativeFunction, OpCode, Upvalue, Value, BoundMethod};
+use super::code::{
+    self, BoundMethod, Class, Closure, Instance, NativeFunction, OpCode, Upvalue, Value,
+};
 use super::compiler;
 
 const DEBUG_TRACING: bool = true;
@@ -399,8 +401,13 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 if let Value::Instance(instance) = state.value_stack.pop().unwrap() {
                     if let Some(field_value) = instance.fields.borrow().get(&property_name) {
                         state.value_stack.push(field_value.clone());
-                    } else if let Some(closure) = instance.class.methods.borrow().get(&property_name) {
-                        let bound_method = BoundMethod { instance: instance.clone(), closure: closure.clone() };
+                    } else if let Some(closure) =
+                        instance.class.methods.borrow().get(&property_name)
+                    {
+                        let bound_method = BoundMethod {
+                            instance: instance.clone(),
+                            closure: closure.clone(),
+                        };
                         state.value_stack.push(Value::from(bound_method));
                     } else {
                         return Err(build_error(
@@ -497,6 +504,9 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
+    // this should point to the current location of the callee on the stack, regular arguments will begin in slot 1 relative to this base pointer
+    let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
+
     match callee {
         Value::BoundMethod(method) => {
             if method.closure.function.arity != arg_count {
@@ -508,12 +518,8 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
                     last_line_number(state),
                 ));
             }
-
-            // this should point to the current location of the callee on the stack, arguments will begin in slot 1 relative to this base pointer
-            let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
             // rewrite local slot zero with the value of the bound method instance, used when referencing 'this' in function body
             state.value_stack[locals_base] = Value::Instance(method.instance.clone());
-
             state.call_stack.push(CallFrame {
                 ip: 0,
                 locals_base,
@@ -530,10 +536,6 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
                     last_line_number(state),
                 ));
             }
-
-            // this should point to the location of the callee on the stack, arguments will begin in slot 1 relative to this base pointer
-            let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
-
             state.call_stack.push(CallFrame {
                 ip: 0,
                 locals_base,
@@ -550,32 +552,46 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
                     last_line_number(state),
                 ));
             }
-
-            let args_begin = state.value_stack.len() - (arg_count as usize);
+            let args_begin = locals_base + 1;
             let args = &state.value_stack[args_begin..state.value_stack.len()];
+            // run the native function directly
             let result = (native_function.func)(args);
-
-            // make sure to pop the native function callable itself which is the entry before the first argument
+            // pop arguments and make sure to pop the native function callable itself which is the entry before the first argument
             state
                 .value_stack
-                .drain((args_begin - 1)..state.value_stack.len());
+                .drain((locals_base)..state.value_stack.len());
             state.value_stack.push(result);
         }
         Value::Class(class) => {
-            if arg_count != 0 {
-                return Err(build_error(
-                    "Constructor arguments not yet supported.",
-                    last_line_number(state),
-                ));
-            }
-
             let instance = Value::from(Instance {
-                class,
+                class: class.clone(),
                 fields: RefCell::new(HashMap::new()),
             });
-            // replace the class value on the stack with the newly created instance
-            let callee_location = state.value_stack.len() - (arg_count as usize) - 1;
-            state.value_stack[callee_location] = instance;
+            // replace the class value (callee) on the stack with the newly created instance
+            state.value_stack[locals_base] = instance;
+
+            // automatically run a class's type initializer (init() method) if it exists
+            if let Some(init) = class.methods.borrow().get(code::TYPE_INITIALIZER_METHOD) {
+                if init.function.arity != arg_count {
+                    return Err(build_error(
+                        &format!(
+                            "Expected {} arguments to the type initializer for class {} but received {}.",
+                            init.function.arity, class.name, arg_count
+                        ),
+                        last_line_number(state),
+                    ));
+                }
+                state.call_stack.push(CallFrame {
+                    ip: 0,
+                    locals_base,
+                    closure: init.clone(),
+                })
+            } else if arg_count != 0 {
+                return Err(build_error(
+                        &format!("Unexpected arguments to initializer for class {} that has no init() method.", class.name),
+                        last_line_number(state),
+                    ));
+            }
         }
         _ => {
             return Err(build_error(

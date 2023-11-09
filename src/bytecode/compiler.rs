@@ -10,8 +10,6 @@ type UnitResult = BasicResult<()>;
 
 const DEBUG_DUMP_CHUNK: bool = true;
 
-const NAME_FOR_SELF: &str = "this";
-
 struct Parser {
     scanner: Scanner,
     current: Token,
@@ -57,6 +55,13 @@ struct CompilerFunction {
     definition: Function,
     locals: Vec<Local>,
     upvalues: Vec<Upvalue>,
+    function_type: FunctionType,
+}
+
+enum FunctionType {
+    FreeFunction,
+    ClassMethod,
+    TypeInitializer,
 }
 
 struct Compiler {
@@ -81,6 +86,7 @@ impl Compiler {
                 definition: root_func,
                 locals: Vec::new(),
                 upvalues: Vec::new(),
+                function_type: FunctionType::FreeFunction,
             }],
             scope_depth: 0,
             class_depth: 0,
@@ -431,11 +437,6 @@ fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> Uni
     Ok(())
 }
 
-enum FunctionType {
-    FreeFunction,
-    ClassMethod,
-}
-
 fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
@@ -448,15 +449,18 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
         },
         locals: Vec::new(),
         upvalues: Vec::new(),
+        function_type,
     });
 
     compiler.begin_scope();
 
-    match function_type {
+    match compiler.func().function_type {
         // the free function calling convention has the callee in local slot zero
         FunctionType::FreeFunction => compiler.add_local(name),
-        // the class method calling convention has the object instance in local slot zero
-        FunctionType::ClassMethod => compiler.add_local(NAME_FOR_SELF.to_owned()),
+        // the class method and type init calling conventions have the object instance in local slot zero
+        FunctionType::ClassMethod | FunctionType::TypeInitializer => {
+            compiler.add_local(code::NAME_FOR_SELF.to_owned())
+        }
     }
 
     let arity = function_parameters(compiler)?;
@@ -489,7 +493,12 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
 }
 
 fn emit_empty_return(compiler: &mut Compiler) {
-    compiler.emit_op(OpCode::Nil);
+    if matches!(compiler.func().function_type, FunctionType::TypeInitializer) {
+        // type initializer must always return the bound method instance to the caller, local slot zero with our calling convention
+        compiler.emit_data_op(OpCode::GetLocal, 0)
+    } else {
+        compiler.emit_op(OpCode::Nil);
+    }
     compiler.emit_op(OpCode::Return);
 }
 
@@ -560,7 +569,13 @@ fn method(compiler: &mut Compiler) -> UnitResult {
         .extract_name()
         .clone();
 
-    function(compiler, method_name.clone(), FunctionType::ClassMethod)?;
+    // special handling for return statements within type initializer (init) method
+    let function_type = if method_name == code::TYPE_INITIALIZER_METHOD {
+        FunctionType::TypeInitializer
+    } else {
+        FunctionType::ClassMethod
+    };
+    function(compiler, method_name.clone(), function_type)?;
 
     let name_constant = compiler.chunk_mut().add_constant(Value::from(method_name));
     compiler.emit_data_op(OpCode::Method, name_constant);
@@ -634,6 +649,12 @@ fn return_statement(compiler: &mut Compiler) -> UnitResult {
     if compiler.advance_if_match(TokenType::Semicolon)? {
         emit_empty_return(compiler);
     } else {
+        if matches!(compiler.func().function_type, FunctionType::TypeInitializer) {
+            return Err(build_error(
+                "Can't return a value from an initializer.",
+                compiler.parser.previous.line,
+            ));
+        }
         expression(compiler)?;
         compiler.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
         compiler.emit_op(OpCode::Return);
@@ -822,7 +843,7 @@ fn this(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
             compiler.parser.previous.line,
         ));
     }
-    load_named_variable(compiler, NAME_FOR_SELF);
+    load_named_variable(compiler, code::NAME_FOR_SELF);
     Ok(())
 }
 

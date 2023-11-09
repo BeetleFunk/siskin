@@ -667,25 +667,110 @@ fn invalid_this_expression() -> TestResult {
 #[test]
 fn method_recursion() -> TestResult {
     let code = "\
-        class Factorial {
-            compute(input) {
+        class FactorialOneShot {
+            init() {
                 this.accumulator = 1;
-                return this.internal(input);
             }
 
-            internal(input) {
+            compute(input) {
                 this.accumulator = this.accumulator * input;
                 if (input > 1) {
-                    return this.internal(input - 1);
+                    return this.compute(input - 1);
                 } else {
                     return this.accumulator;
                 }
             }
         }
-        var factorial = Factorial();
+        var factorial = FactorialOneShot();
         print factorial.compute(6);";
 
     let output = run(code)?;
     assert_eq!("720\n", output);
+    Ok(())
+}
+
+#[test]
+fn type_init() -> TestResult {
+    let code = "\
+        class Point {
+            init(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            display() {
+                var info = \"x: \" + toString(this.x) + \" y: \" + toString(this.y);
+                print info;
+            }
+        }
+        var point = Point(1, 2);
+        point.display();";
+
+    let output = run(code)?;
+    assert_eq!("x: 1 y: 2\n", output);
+    Ok(())
+}
+
+#[test]
+fn type_init_early_return() -> TestResult {
+    let code = "\
+        class Thing {
+            init() {
+                print \"initializing\";
+                this.field = 999;
+                return;
+                print \"boom\";
+            }
+        }
+        var instance = Thing();
+        print instance.field;";
+
+    let output = run(code)?;
+    assert_eq!("initializing\n999\n", output);
+    Ok(())
+}
+
+#[test]
+fn type_init_argument_count() -> TestResult {
+    {
+        let code = "\
+            class Bad {
+                init(a, b) {
+                    this.something = b;
+                }
+            }
+            var instance = Bad();";
+        let result = run(code);
+        let error = result.unwrap_err();
+        assert!(error
+            .description
+            .contains("Expected 2 arguments to the type initializer for class Bad but received 0"));
+    }
+    {
+        let code = "\
+            class NoInit {}
+            var instance = NoInit(1);";
+        let result = run(code);
+        let error = result.unwrap_err();
+        assert!(error.description.contains(
+            "Unexpected arguments to initializer for class NoInit that has no init() method"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn type_init_invalid_return() -> TestResult {
+    let code = "\
+            class Bad {
+                init() {
+                    return 0;
+                }
+            }";
+    let result = run(code);
+    let error = result.unwrap_err();
+    assert!(error
+        .description
+        .contains("Can't return a value from an initializer"));
     Ok(())
 }

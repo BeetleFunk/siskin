@@ -6,6 +6,10 @@ use std::rc::Rc;
 
 const TRACE_VALUE_DROP: bool = true;
 
+// special identifier strings that may be needed by both compiler and VM
+pub const TYPE_INITIALIZER_METHOD: &str = "init";
+pub const NAME_FOR_SELF: &str = "this";
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     Return,
