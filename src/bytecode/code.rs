@@ -45,9 +45,10 @@ pub enum OpCode {
     GetProperty,
     SetProperty,
     Method,
+    Invoke,
 }
 
-const OP_TABLE: [OpCode; 33] = [
+const OP_TABLE: [OpCode; 34] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -81,6 +82,7 @@ const OP_TABLE: [OpCode; 33] = [
     OpCode::GetProperty,
     OpCode::SetProperty,
     OpCode::Method,
+    OpCode::Invoke,
 ];
 
 impl From<u8> for OpCode {
@@ -327,6 +329,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::GetProperty => constant_instruction("GetProperty", chunk, offset),
         OpCode::SetProperty => constant_instruction("SetProperty", chunk, offset),
         OpCode::Method => constant_instruction("Method", chunk, offset),
+        OpCode::Invoke => invoke_instruction("Invoke", chunk, offset),
     }
 }
 
@@ -380,6 +383,14 @@ fn closure(chunk: &Chunk, offset: usize) -> usize {
     } else {
         panic!("Unexpected value for closure")
     }
+}
+
+fn invoke_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
+    let constant_index = chunk.code[offset + 1];
+    let method_name = &chunk.values[constant_index as usize];
+    let arg_count = chunk.code[offset + 2];
+    println!("{opcode_name} ({arg_count} args) {constant_index:04} = {method_name}");
+    3
 }
 
 // Drop tracing stuff for garbage collected value types

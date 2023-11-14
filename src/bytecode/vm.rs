@@ -328,7 +328,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Call => {
                 let arg_count = read_byte(state);
                 // cloning values should be cheap (functions use Rc)
-                let callee: Value =
+                let callee =
                     state.value_stack[state.value_stack.len() - 1 - (arg_count as usize)].clone();
                 call_value(state, callee, arg_count)?;
             }
@@ -451,6 +451,36 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     class.methods.borrow_mut().insert(name, method);
                 } else {
                     panic!("The target class must be on the value stack for method creation.");
+                }
+            }
+            OpCode::Invoke => {
+                let property_name = read_string_constant(state);
+                let arg_count = read_byte(state);
+                let receiver_stack_index = state.value_stack.len() - 1 - (arg_count as usize);
+                let receiver = &state.value_stack[receiver_stack_index];
+
+                if let Value::Instance(instance) = receiver {
+                    // fields take precedence and can shadow methods
+                    let closure = if instance.fields.borrow().contains_key(&property_name) {
+                        let field_value = instance.fields.borrow().get(&property_name).unwrap().clone();
+                        // standard calling convention when invoking the value on a field: stack slot zero (the method receiver) should be the closure itself
+                        state.value_stack[receiver_stack_index] = field_value.clone();
+                        field_value
+                    } else if let Some(method_closure) = instance.class.methods.borrow().get(&property_name) {
+                        // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
+                        Value::Closure(method_closure.clone())
+                    } else {
+                        return Err(build_error(
+                            &format!("Undefined property '{}'.", property_name),
+                            last_line_number(state),
+                        ));
+                    };
+                    call_value(state, closure, arg_count)?;
+                } else {
+                    return Err(build_error(
+                        "Property access only allowed for instances.",
+                        last_line_number(state),
+                    ));
                 }
             }
         }

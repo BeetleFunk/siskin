@@ -912,6 +912,11 @@ fn dot(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
         expression(compiler)?;
         compiler.emit_data_op(OpCode::SetProperty, property_name);
+    } else if compiler.advance_if_match(TokenType::LeftParen)? {
+        // detect call immediately after access and emit optimized form that avoids creating a full method binding
+        let arg_count = argument_list(compiler)?;
+        compiler.emit_op(OpCode::Invoke);
+        compiler.emit_data(property_name, arg_count);
     } else {
         compiler.emit_data_op(OpCode::GetProperty, property_name);
     }

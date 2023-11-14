@@ -774,3 +774,35 @@ fn type_init_invalid_return() -> TestResult {
         .contains("Can't return a value from an initializer"));
     Ok(())
 }
+
+#[test]
+fn method_invocation_optimization() -> TestResult {
+    let code = "\
+        class Dynamite {
+            countdown(time) {
+                while (time > 0) {
+                    print time;
+                    time = time - 1;
+                }
+                print \"Boom!\";
+            }
+        }
+        var boom = Dynamite();
+        boom.countdown(5);
+
+        fun confettiCountdown(time) {
+            print time;
+            if (time > 0) {
+                confettiCountdown(time - 1);
+            } else {
+                print \"Surprise!\";
+            }
+        }
+        // field should shadow the method now
+        boom.countdown = confettiCountdown;
+        boom.countdown(5);";
+
+    let output = run(code)?;
+    assert_eq!("5\n4\n3\n2\n1\nBoom!\n5\n4\n3\n2\n1\n0\nSurprise!\n", output);
+    Ok(())
+}
