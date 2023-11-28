@@ -545,6 +545,24 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
     define_variable_no_replace(compiler, identifier.clone())?;
 
+    if compiler.advance_if_match(TokenType::Less)? {
+        let super_name = compiler
+            .consume(TokenType::Identifier, "Expect superclass name.")?
+            .extract_name()
+            .clone();
+        let class_name = identifier.extract_name();
+        if super_name == *class_name {
+            return Err(build_error(
+                "Class cannot inherit from itself.",
+                compiler.parser.previous.line,
+            ));
+        }
+        // emit code to load the superclass and current class values onto the stack
+        load_named_variable(compiler, &super_name);
+        load_named_variable(compiler, class_name);
+        compiler.emit_op(OpCode::Inherit)
+    }
+
     compiler.class_depth += 1;
     compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
 

@@ -462,11 +462,18 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 if let Value::Instance(instance) = receiver {
                     // fields take precedence and can shadow methods
                     let closure = if instance.fields.borrow().contains_key(&property_name) {
-                        let field_value = instance.fields.borrow().get(&property_name).unwrap().clone();
+                        let field_value = instance
+                            .fields
+                            .borrow()
+                            .get(&property_name)
+                            .unwrap()
+                            .clone();
                         // standard calling convention when invoking the value on a field: stack slot zero (the method receiver) should be the closure itself
                         state.value_stack[receiver_stack_index] = field_value.clone();
                         field_value
-                    } else if let Some(method_closure) = instance.class.methods.borrow().get(&property_name) {
+                    } else if let Some(method_closure) =
+                        instance.class.methods.borrow().get(&property_name)
+                    {
                         // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
                         Value::Closure(method_closure.clone())
                     } else {
@@ -479,6 +486,27 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 } else {
                     return Err(build_error(
                         "Property access only allowed for instances.",
+                        last_line_number(state),
+                    ));
+                }
+            }
+            OpCode::Inherit => {
+                let subclass = if let Value::Class(subclass) = state.value_stack.pop().unwrap() {
+                    subclass
+                } else {
+                    panic!(
+                        "Inherit instruction expects a class type value to be on top of the stack."
+                    );
+                };
+                let superclass = state.value_stack.pop().unwrap();
+                if let Value::Class(superclass) = superclass {
+                    subclass
+                        .methods
+                        .borrow_mut()
+                        .clone_from(&superclass.methods.borrow());
+                } else {
+                    return Err(build_error(
+                        "Superclass must be a class.",
                         last_line_number(state),
                     ));
                 }

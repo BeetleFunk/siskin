@@ -806,3 +806,20 @@ fn method_invocation_optimization() -> TestResult {
     assert_eq!("5\n4\n3\n2\n1\nBoom!\n5\n4\n3\n2\n1\n0\nSurprise!\n", output);
     Ok(())
 }
+
+#[test]
+fn basic_inheritance() -> TestResult {
+    let code = "\
+        class Charge {
+            boom() {
+                print \"Asplode!\";
+            }
+        }
+        class Dynamite < Charge {}
+        var dynamite = Dynamite();
+        dynamite.boom();";
+
+    let output = run(code)?;
+    assert_eq!("Asplode!\n", output);
+    Ok(())
+}

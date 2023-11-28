@@ -46,9 +46,10 @@ pub enum OpCode {
     SetProperty,
     Method,
     Invoke,
+    Inherit,
 }
 
-const OP_TABLE: [OpCode; 34] = [
+const OP_TABLE: [OpCode; 35] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -83,6 +84,7 @@ const OP_TABLE: [OpCode; 34] = [
     OpCode::SetProperty,
     OpCode::Method,
     OpCode::Invoke,
+    OpCode::Inherit,
 ];
 
 impl From<u8> for OpCode {
@@ -330,6 +332,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::SetProperty => constant_instruction("SetProperty", chunk, offset),
         OpCode::Method => constant_instruction("Method", chunk, offset),
         OpCode::Invoke => invoke_instruction("Invoke", chunk, offset),
+        OpCode::Inherit => simple_instruction("Inherit"),
     }
 }
 
