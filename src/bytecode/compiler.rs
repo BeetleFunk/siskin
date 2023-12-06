@@ -58,6 +58,10 @@ struct CompilerFunction {
     function_type: FunctionType,
 }
 
+struct CompilerClass {
+    has_superclass: bool,
+}
+
 enum FunctionType {
     FreeFunction,
     ClassMethod,
@@ -67,8 +71,8 @@ enum FunctionType {
 struct Compiler {
     parser: Parser,
     func_stack: Vec<CompilerFunction>,
+    class_stack: Vec<CompilerClass>,
     scope_depth: u32,
-    class_depth: u32, // zero if not inside a definition
 }
 
 impl Compiler {
@@ -88,8 +92,8 @@ impl Compiler {
                 upvalues: Vec::new(),
                 function_type: FunctionType::FreeFunction,
             }],
+            class_stack: Vec::new(),
             scope_depth: 0,
-            class_depth: 0,
         }
     }
 
@@ -331,7 +335,7 @@ const PARSE_TABLE: [(TokenType, ParseRule); 39] = [
     (TokenType::Or,             ParseRule { prefix: None,           infix: Some(logic_or),  precedence: PREC_OR }),
     (TokenType::Print,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
     (TokenType::Return,         ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
-    (TokenType::Super,          ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
+    (TokenType::Super,          ParseRule { prefix: Some(super_),   infix: None,            precedence: PREC_NONE }),
     (TokenType::This,           ParseRule { prefix: Some(this),     infix: None,            precedence: PREC_NONE }),
     (TokenType::True,           ParseRule { prefix: Some(literal),  infix: None,            precedence: PREC_NONE }),
     (TokenType::Var,            ParseRule { prefix: None,           infix: None,            precedence: PREC_NONE }),
@@ -545,7 +549,8 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
     define_variable_no_replace(compiler, identifier.clone())?;
 
-    if compiler.advance_if_match(TokenType::Less)? {
+    let has_superclass = compiler.advance_if_match(TokenType::Less)?;
+    if has_superclass {
         let super_name = compiler
             .consume(TokenType::Identifier, "Expect superclass name.")?
             .extract_name()
@@ -557,13 +562,16 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
                 compiler.parser.previous.line,
             ));
         }
-        // emit code to load the superclass and current class values onto the stack
+        // emit code to load the superclass and current class values onto the stack and execute inherit
         load_named_variable(compiler, &super_name);
         load_named_variable(compiler, class_name);
-        compiler.emit_op(OpCode::Inherit)
+        compiler.emit_op(OpCode::Inherit);
+        // inherit leaves superclass on the stack, references to "super" will use this synthetic local value
+        compiler.begin_scope();
+        compiler.add_local(code::NAME_FOR_SUPERCLASS.to_owned());
     }
 
-    compiler.class_depth += 1;
+    compiler.class_stack.push(CompilerClass { has_superclass });
     compiler.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
 
     // load the class onto the top of the stack for following method assignment instructions
@@ -576,7 +584,10 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     compiler.emit_op(OpCode::Pop);
 
     compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
-    compiler.class_depth -= 1;
+    let finished_class = compiler.class_stack.pop().unwrap();
+    if finished_class.has_superclass {
+        compiler.end_scope();
+    }
 
     Ok(())
 }
@@ -853,9 +864,30 @@ fn literal(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     Ok(())
 }
 
-// kinda like a special variable name that cannot be assigned to and is only valid inside of a method definition
+fn super_(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
+    if compiler.class_stack.is_empty() {
+        return Err(build_error(
+            "Can't use 'super' outside of a class.",
+            compiler.parser.previous.line,
+        ));
+    } else if !compiler.class_stack.last().unwrap().has_superclass {
+        return Err(build_error(
+            "Can't use 'super' in a class with no superclass.",
+            compiler.parser.previous.line,
+        ));
+    }
+    compiler.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
+    let method_name = compiler.consume(TokenType::Identifier, "Expect superclass method name.")?.extract_name().clone();
+    let method_name = compiler.chunk_mut().add_constant(Value::from(method_name));
+    load_named_variable(compiler, code::NAME_FOR_SELF);
+    load_named_variable(compiler, code::NAME_FOR_SUPERCLASS);
+    compiler.emit_data_op(OpCode::GetSuper, method_name);
+    Ok(())
+}
+
+// handled like a special variable name that cannot be assigned to and is only valid inside of a method definition
 fn this(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    if compiler.class_depth == 0 {
+    if compiler.class_stack.is_empty() {
         return Err(build_error(
             "Can't use 'this' outside of a class.",
             compiler.parser.previous.line,

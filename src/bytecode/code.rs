@@ -9,6 +9,7 @@ const TRACE_VALUE_DROP: bool = true;
 // special identifier strings that may be needed by both compiler and VM
 pub const TYPE_INITIALIZER_METHOD: &str = "init";
 pub const NAME_FOR_SELF: &str = "this";
+pub const NAME_FOR_SUPERCLASS: &str = "super";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
@@ -47,9 +48,10 @@ pub enum OpCode {
     Method,
     Invoke,
     Inherit,
+    GetSuper,
 }
 
-const OP_TABLE: [OpCode; 35] = [
+const OP_TABLE: [OpCode; 36] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -85,6 +87,7 @@ const OP_TABLE: [OpCode; 35] = [
     OpCode::Method,
     OpCode::Invoke,
     OpCode::Inherit,
+    OpCode::GetSuper,
 ];
 
 impl From<u8> for OpCode {
@@ -333,6 +336,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::Method => constant_instruction("Method", chunk, offset),
         OpCode::Invoke => invoke_instruction("Invoke", chunk, offset),
         OpCode::Inherit => simple_instruction("Inherit"),
+        OpCode::GetSuper => constant_instruction("GetSuper", chunk, offset),
     }
 }
 

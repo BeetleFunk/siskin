@@ -803,7 +803,10 @@ fn method_invocation_optimization() -> TestResult {
         boom.countdown(5);";
 
     let output = run(code)?;
-    assert_eq!("5\n4\n3\n2\n1\nBoom!\n5\n4\n3\n2\n1\n0\nSurprise!\n", output);
+    assert_eq!(
+        "5\n4\n3\n2\n1\nBoom!\n5\n4\n3\n2\n1\n0\nSurprise!\n",
+        output
+    );
     Ok(())
 }
 
@@ -821,5 +824,67 @@ fn basic_inheritance() -> TestResult {
 
     let output = run(code)?;
     assert_eq!("Asplode!\n", output);
+    Ok(())
+}
+
+#[test]
+fn accessing_super_method() -> TestResult {
+    let code = "\
+    class Doughnut {
+        cook() {
+            print \"Dunk in the fryer.\";
+            this.finish(\"sprinkles\");
+        }
+
+        finish(ingredient) {
+            print \"Finish with \" + ingredient;
+        }
+    }
+
+    class Cruller < Doughnut {
+        finish(ingredient) {
+            // No sprinkles, always icing.
+            super.finish(\"icing\");
+        }
+    }
+    
+    var cruller = Cruller();
+    cruller.cook();";
+
+    let output = run(code)?;
+    assert_eq!("Dunk in the fryer.\nFinish with icing\n", output);
+    Ok(())
+}
+
+#[test]
+fn not_working() -> TestResult {
+    let code = "\
+    class Display {
+        init(thing) {
+            this.thing = thing;
+        }
+
+        disp() {
+            print this.thing;
+        }
+    }
+
+    class Sub < Display {
+        callSuper() {
+            super.disp();
+        }
+
+        doDisp() {
+            super.disp();
+        }
+    }
+
+    {
+        var special = Sub(\"special stuff\");
+        special.callSuper();
+    }";
+
+    let output = run(code)?;
+    assert_eq!("", output);
     Ok(())
 }

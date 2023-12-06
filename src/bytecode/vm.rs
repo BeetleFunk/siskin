@@ -494,11 +494,10 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 let subclass = if let Value::Class(subclass) = state.value_stack.pop().unwrap() {
                     subclass
                 } else {
-                    panic!(
-                        "Inherit instruction expects a class type value to be on top of the stack."
-                    );
+                    panic!("Inherit instruction expects a class type value to be on top of the stack.");
                 };
-                let superclass = state.value_stack.pop().unwrap();
+                // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
+                let superclass = state.value_stack.last().unwrap();
                 if let Value::Class(superclass) = superclass {
                     subclass
                         .methods
@@ -510,6 +509,31 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         last_line_number(state),
                     ));
                 }
+            }
+            OpCode::GetSuper => {
+                let method_name = read_string_constant(state);
+                let superclass = if let Value::Class(superclass) = state.value_stack.pop().unwrap() {
+                    superclass
+                } else {
+                    panic!("GetSuper instruction expects a class type value to be on top of the stack.");
+                };
+                let instance = if let Value::Instance(instance) = state.value_stack.pop().unwrap() {
+                    instance
+                } else {
+                    panic!("GetSuper instruction expects an instance type value to be on the stack.");
+                };
+                if let Some(closure) = superclass.methods.borrow().get(&method_name) {
+                    let bound_method = BoundMethod {
+                        instance: instance.clone(),
+                        closure: closure.clone(),
+                    };
+                    state.value_stack.push(Value::from(bound_method));
+                } else {
+                    return Err(build_error(
+                        &format!("Method {} doesn't exist on the superclass.", method_name),
+                        last_line_number(state),
+                    ));
+                };
             }
         }
     }
