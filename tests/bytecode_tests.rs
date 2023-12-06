@@ -830,26 +830,53 @@ fn basic_inheritance() -> TestResult {
 #[test]
 fn accessing_super_method() -> TestResult {
     let code = "\
-    class Doughnut {
-        cook() {
-            print \"Dunk in the fryer.\";
-            this.finish(\"sprinkles\");
+        class Parent {
+            getPrinter() {
+                fun display(stuff) {
+                    print \"Printing: \" + stuff;
+                }
+                return display;
+            }
         }
 
-        finish(ingredient) {
-            print \"Finish with \" + ingredient;
+        class Child < Parent {
+            getMethodFromParent() {
+                return super.getPrinter;
+            }
         }
-    }
+        
+        var object = Child();
+        var display = object.getMethodFromParent()();
+        display(\"some content\");";
 
-    class Cruller < Doughnut {
-        finish(ingredient) {
-            // No sprinkles, always icing.
-            super.finish(\"icing\");
+    let output = run(code)?;
+    assert_eq!("Printing: some content\n", output);
+    Ok(())
+}
+
+#[test]
+fn calling_super_method() -> TestResult {
+    let code = "\
+        class Doughnut {
+            cook() {
+                print \"Dunk in the fryer.\";
+                this.finish(\"sprinkles\");
+            }
+
+            finish(ingredient) {
+                print \"Finish with \" + ingredient;
+            }
         }
-    }
-    
-    var cruller = Cruller();
-    cruller.cook();";
+
+        class Cruller < Doughnut {
+            finish(ingredient) {
+                // No sprinkles, always icing.
+                super.finish(\"icing\");
+            }
+        }
+        
+        var cruller = Cruller();
+        cruller.cook();";
 
     let output = run(code)?;
     assert_eq!("Dunk in the fryer.\nFinish with icing\n", output);
@@ -857,34 +884,119 @@ fn accessing_super_method() -> TestResult {
 }
 
 #[test]
-fn not_working() -> TestResult {
+fn capture_super_upvalue_multiple_times() -> TestResult {
     let code = "\
-    class Display {
-        init(thing) {
-            this.thing = thing;
+        class Base {
+            init(thing) {
+                this.thing = thing;
+            }
+
+            disp() {
+                print this.thing;
+            }
+
+            add(num1, num2) {
+                return num1 + num2;
+            }
         }
 
-        disp() {
-            print this.thing;
-        }
-    }
+        class Sub < Base {
+            init(thing) {
+                super.init(thing);
+                this.additional = \"extra field stuff\";
+            }
 
-    class Sub < Display {
-        callSuper() {
-            super.disp();
+            disp() {
+                super.disp();
+                print this.additional;
+            }
+
+            extra() {
+                this.thing = super.add(7, 3);
+                this.disp();
+            }
         }
 
-        doDisp() {
-            super.disp();
-        }
-    }
-
-    {
-        var special = Sub(\"special stuff\");
-        special.callSuper();
-    }";
+        {
+            var special = Sub(\"my interesting information\");
+            special.disp();
+            special.extra();
+        }";
 
     let output = run(code)?;
-    assert_eq!("", output);
+    assert_eq!("my interesting information\nextra field stuff\n10\nextra field stuff\n", output);
+    Ok(())
+}
+
+#[test]
+fn upvalue_captured_multiple_times() -> TestResult {
+    let code = "\
+        class Pair {}
+        fun makeClosurePair() {
+            var captured = 5;
+
+            fun setCaptured(value) {
+                captured = value;
+            }
+
+            fun printCaptured() {
+                print captured;
+            }
+
+            var pair = Pair();
+            pair.first = setCaptured;
+            pair.second = printCaptured;
+            return pair;
+        }
+
+        {
+            var test = makeClosurePair();
+            test.second();
+            test.first(999);
+            test.second();
+        }";
+
+    let output = run(code)?;
+    assert_eq!("5\n999\n", output);
+    Ok(())
+}
+
+#[test]
+fn upvalues_captured_not_in_stack_order() -> TestResult {
+    let code = "\
+        var closures;
+        {
+            class Triple {}
+            fun makeClosures() {
+                var var1 = 1;
+                var var2 = 2;
+                var var3 = 3;
+                fun print3() {
+                    print var3;
+                }
+                fun print2() {
+                    print var2 + var3;
+                }
+                fun print1() {
+                    print var1 + var2 + var3;
+                }
+
+                var closures = Triple();
+                closures.first = print3;
+                closures.second = print2;
+                closures.third = print1;
+                return closures;
+            }
+            closures = makeClosures();
+        }
+
+        {
+            closures.first();
+            closures.second();
+            closures.third();
+        }";
+
+    let output = run(code)?;
+    assert_eq!("3\n5\n6\n", output);
     Ok(())
 }

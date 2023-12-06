@@ -140,7 +140,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
         if DEBUG_TRACING {
             print_stack(&state.value_stack);
             let frame = state.frame();
-            code::disassemble_instruction(&frame.closure.function.chunk, frame.ip);
+            code::disassemble_instruction(&frame.closure.function.chunk, frame.ip, false);
         }
 
         let opcode: OpCode = read_byte(state).into();
@@ -341,7 +341,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         let slot_index = read_byte(state);
                         if is_local {
                             let stack_index = state.frame().locals_base + (slot_index as usize);
-                            upvalues.push(create_upvalue(state, stack_index));
+                            upvalues.push(capture_upvalue(state, stack_index));
                         } else {
                             // copy the upvalue from the enclosing function (current frame on the top of the call stack)
                             let enclosing_upvalue =
@@ -559,7 +559,7 @@ fn read_constant(state: &mut State) -> Value {
     let value = &state.frame().closure.function.chunk.values[index as usize];
 
     if DEBUG_TRACING {
-        println!("Constant {index:04} = {value}");
+        //println!("Constant {index:04} = {value}");
     }
 
     // TODO: need to clone this?
@@ -685,12 +685,24 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
     Ok(())
 }
 
-fn create_upvalue(state: &mut State, stack_index: usize) -> Rc<Upvalue> {
+fn capture_upvalue(state: &mut State, stack_index: usize) -> Rc<Upvalue> {
+    let open_upvalues_rev = state
+        .open_upvalues
+        .iter()
+        .rev();
+    for upvalue in open_upvalues_rev {
+        if upvalue.stack_index == stack_index {
+            println!("Found existing upvalue for stack slot {stack_index}.");
+            return upvalue.clone();
+        }
+    }
+
     let upvalue = Rc::new(Upvalue {
         stack_index,
         closed: RefCell::new(None),
     });
     state.open_upvalues.push(upvalue.clone());
+    println!("Creating upvalue for stack slot {stack_index}.");
     upvalue
 }
 
@@ -707,7 +719,7 @@ fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
         let upvalue = state.open_upvalues.remove(position);
         if DEBUG_TRACING {
             let other_refs = Rc::strong_count(&upvalue) - 1;
-            println!("Closing upvalue with {other_refs} remaining references.");
+            println!("Closing upvalue ({}) for stack slot {} with {} remaining references.", value, upvalue.stack_index, other_refs);
         }
         *upvalue.closed.borrow_mut() = Some(value);
         true
@@ -726,7 +738,7 @@ fn pop_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
         .collect();
     let mut stack_index_rev = (stack_index_begin..end).rev();
     for value in popped_values_rev {
-        // TODO: this can be optimized by stopping as soon as a lower stack index is reached in the upvalue reverse list search
+        // TODO: can this can be optimized by stopping as soon as a lower stack index is reached in the upvalue reverse list search?
         close_upvalue(state, stack_index_rev.next().unwrap(), value);
     }
 }

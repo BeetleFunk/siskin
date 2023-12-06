@@ -286,11 +286,13 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
 
     let mut offset: usize = 0;
     while offset < chunk.code.len() {
-        offset += disassemble_instruction(chunk, offset);
+        offset += disassemble_instruction(chunk, offset, true);
     }
+
+    println!("== end {name} ==");
 }
 
-pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
+pub fn disassemble_instruction(chunk: &Chunk, offset: usize, expand_functions: bool) -> usize {
     print!("{offset:04} ");
 
     if offset > 0 && chunk.line_numbers[offset] == chunk.line_numbers[offset - 1] {
@@ -326,7 +328,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::JumpIfFalse => short_instruction("JumpIfFalse", chunk, offset),
         OpCode::Loop => short_instruction("Loop", chunk, offset),
         OpCode::Call => byte_instruction("Call", chunk, offset),
-        OpCode::Closure => closure(chunk, offset),
+        OpCode::Closure => closure(chunk, offset, expand_functions),
         OpCode::GetUpvalue => byte_instruction("GetUpvalue", chunk, offset),
         OpCode::SetUpvalue => byte_instruction("SetUpvalue", chunk, offset),
         OpCode::CloseUpvalue => simple_instruction("CloseUpvalue"),
@@ -368,7 +370,7 @@ fn short_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
     3
 }
 
-fn closure(chunk: &Chunk, offset: usize) -> usize {
+fn closure(chunk: &Chunk, offset: usize, expand_functions: bool) -> usize {
     let function_index = chunk.code[offset + 1];
     let value = &chunk.values[function_index as usize];
 
@@ -382,8 +384,9 @@ fn closure(chunk: &Chunk, offset: usize) -> usize {
             println!("  | ({upvalue_offset:04}) captured: {capture_type} => slot {slot_index}");
         }
 
-        disassemble_chunk(&function.chunk, &function.name);
-        println!("== end {} ==", &function.name);
+        if expand_functions {
+            disassemble_chunk(&function.chunk, &function.name);
+        }
 
         // variable width encoding
         2 + (2 * (function.upvalue_count as usize))
