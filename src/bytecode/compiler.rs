@@ -880,8 +880,16 @@ fn super_(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     let method_name = compiler.consume(TokenType::Identifier, "Expect superclass method name.")?.extract_name().clone();
     let method_name = compiler.chunk_mut().add_constant(Value::from(method_name));
     load_named_variable(compiler, code::NAME_FOR_SELF);
-    load_named_variable(compiler, code::NAME_FOR_SUPERCLASS);
-    compiler.emit_data_op(OpCode::GetSuper, method_name);
+    if compiler.advance_if_match(TokenType::LeftParen)? {
+        // optimization for direct invocation
+        let arg_count = argument_list(compiler)?;
+        load_named_variable(compiler, code::NAME_FOR_SUPERCLASS);
+        compiler.emit_op(OpCode::SuperInvoke);
+        compiler.emit_data(method_name, arg_count);
+    } else {
+        load_named_variable(compiler, code::NAME_FOR_SUPERCLASS);
+        compiler.emit_data_op(OpCode::GetSuper, method_name);
+    }
     Ok(())
 }
 

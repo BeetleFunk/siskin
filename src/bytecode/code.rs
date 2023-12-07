@@ -49,9 +49,10 @@ pub enum OpCode {
     Invoke,
     Inherit,
     GetSuper,
+    SuperInvoke,
 }
 
-const OP_TABLE: [OpCode; 36] = [
+const OP_TABLE: [OpCode; 37] = [
     OpCode::Return,
     OpCode::Constant,
     OpCode::Negate,
@@ -88,6 +89,7 @@ const OP_TABLE: [OpCode; 36] = [
     OpCode::Invoke,
     OpCode::Inherit,
     OpCode::GetSuper,
+    OpCode::SuperInvoke,
 ];
 
 impl From<u8> for OpCode {
@@ -339,6 +341,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, expand_functions: b
         OpCode::Invoke => invoke_instruction("Invoke", chunk, offset),
         OpCode::Inherit => simple_instruction("Inherit"),
         OpCode::GetSuper => constant_instruction("GetSuper", chunk, offset),
+        OpCode::SuperInvoke => invoke_instruction("SuperInvoke", chunk, offset)
     }
 }
 

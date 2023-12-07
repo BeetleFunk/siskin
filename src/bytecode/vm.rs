@@ -535,6 +535,25 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     ));
                 };
             }
+            OpCode::SuperInvoke => {
+                let method_name = read_string_constant(state);
+                let arg_count = read_byte(state);
+                let superclass = if let Value::Class(superclass) = state.value_stack.pop().unwrap() {
+                    superclass
+                } else {
+                    panic!("SuperInvoke instruction expects a class type value to be on top of the stack.");
+                };
+                if let Some(method) = superclass.methods.borrow().get(&method_name) {
+                    // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
+                    let callee = Value::Closure(method.clone());
+                    call_value(state, callee, arg_count)?;
+                } else {
+                    return Err(build_error(
+                        &format!("Method {} doesn't exist on the superclass.", method_name),
+                        last_line_number(state),
+                    ));
+                };
+            }
         }
     }
 
