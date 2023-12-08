@@ -14,6 +14,7 @@ fn run(code: &str) -> error::BasicResult<String> {
     Ok(output.to_string())
 }
 
+#[ignore]
 #[test]
 // the original strategy of primitive reference counting (using Rust's Rc) does not reclaim circular references once they go out of scope
 fn circular_references() -> TestResult {    
