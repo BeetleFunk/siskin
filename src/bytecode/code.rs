@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
+use crate::error::BasicResult;
+
 const TRACE_VALUE_DROP: bool = true;
 
 // special identifier strings that may be needed by both compiler and VM
@@ -263,7 +265,7 @@ pub struct Upvalue {
 
 pub struct NativeFunction {
     pub arity: u8,
-    pub func: fn(arguments: &[Value]) -> Value,
+    pub func: fn(arguments: &[Value]) -> BasicResult<Value>,
     pub name: String,
 }
 

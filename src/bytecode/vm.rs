@@ -2,7 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 
@@ -67,6 +68,11 @@ fn create_globals() -> HashMap<String, Value> {
             func: native_to_string,
             name: "toString".to_string(),
         },
+        NativeFunction {
+            arity: 1,
+            func: native_sleep,
+            name: "sleep".to_string(),
+        },
     ];
 
     // add standard library native functions into the globals
@@ -76,25 +82,37 @@ fn create_globals() -> HashMap<String, Value> {
     globals
 }
 
-fn native_clock(_args: &[Value]) -> Value {
+fn native_clock(_args: &[Value]) -> BasicResult<Value> {
     // make sure epoch is initialized first (lazy init)
     let epoch = *EPOCH;
     let duration = Instant::now() - epoch;
     // lossy conversion to f64 here, shouldn't be an issue for a while though
-    (duration.as_millis() as f64).into()
+    Ok((duration.as_millis() as f64).into())
 }
 
-fn native_sqrt(args: &[Value]) -> Value {
+fn native_sqrt(args: &[Value]) -> BasicResult<Value> {
     if let Value::Number(value) = args[0] {
-        value.sqrt().into()
+        Ok(Value::from(value.sqrt()))
     } else {
-        // TODO: runtime errors from native functions
-        panic!("Expected number argument in sqrt function.");
+        Err(BasicError::new("Expected number argument for sqrt function."))
     }
 }
 
-fn native_to_string(args: &[Value]) -> Value {
-    Value::from(args[0].to_string())
+fn native_to_string(args: &[Value]) -> BasicResult<Value> {
+    Ok(Value::from(args[0].to_string()))
+}
+
+fn native_sleep(args: &[Value]) -> BasicResult<Value> {
+    if let Value::Number(value) = args[0] {
+        if value < 0.0 {
+            return Err(BasicError::new("Expected positive number argument for sleep function."))
+        }
+        let duration = Duration::from_millis(value as u64);
+        thread::sleep(duration);
+        Ok(Value::Nil)
+    } else {
+        Err(BasicError::new("Expected number argument for sleep function."))
+    }
 }
 
 struct CallFrame {
@@ -661,7 +679,12 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             state
                 .value_stack
                 .drain((locals_base)..state.value_stack.len());
-            state.value_stack.push(result);
+
+            if let Err(e) = result {
+                return Err(build_error(&format!("Native function runtime error - {}", e.description), last_line_number(state)))
+            } else {
+                state.value_stack.push(result.unwrap());   
+            }
         }
         Value::Class(class) => {
             let instance = Value::from(Instance {

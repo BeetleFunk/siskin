@@ -389,6 +389,14 @@ fn native_function() -> TestResult {
 }
 
 #[test]
+fn native_function_runtime_error() -> TestResult {
+    let code = "print sqrt(\"boom\");";
+    let error = run(code).expect_err("Test expects a runtime error.");
+    assert!(error.description.contains("Expected number argument for sqrt function"));
+    Ok(())
+}
+
+#[test]
 fn upvalues_on_stack() -> TestResult {
     let code = "\
         fun outer() {
