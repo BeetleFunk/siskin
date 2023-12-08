@@ -1,0 +1,60 @@
+class Node {
+    init(value) {
+        this.value = value;
+    }
+}
+
+class List {
+    init() {
+        this.start = nil;
+        this.end = nil;
+    }
+
+    push(value) {
+        var node = Node(value);
+        if (this.start == nil) {
+            node.prev = nil;
+            node.next = nil;
+            this.start = node;
+            this.end = node;
+        } else {
+            node.prev = this.end;
+            node.next = nil;
+            this.end.next = node;
+            this.end = node;
+        }
+    }
+
+    toString() {
+        if (this.start == nil) {
+            return "EMPTY LIST";
+        }
+
+        var current = this.start;
+        var contents = "[" + toString(current.value);
+        while (current.next != nil) {
+            current = current.next;
+            contents = contents + ", " + toString(current.value);
+        }
+        contents = contents + "]";
+        return contents;
+    }
+}
+
+{
+    var outerList = List();
+    var numLists = 1000;
+    var innerListSize = 1000;
+    for (var i = 0; i < numLists; i = i + 1) {
+        var innerList = List();
+        for (var j = 0; j < innerListSize; j = j + 1) {
+            innerList.push(j);
+        }
+        outerList.push(innerList);
+    }
+    print "Made a big list!";
+    sleep(10000);
+}
+
+print "List is now out of scope!";
+sleep(10000);

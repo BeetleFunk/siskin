@@ -14,7 +14,7 @@ use super::code::{
 };
 use super::compiler;
 
-const DEBUG_TRACING: bool = true;
+const DEBUG_TRACING: bool = false;
 
 const FRAMES_MAX: usize = 256;
 
