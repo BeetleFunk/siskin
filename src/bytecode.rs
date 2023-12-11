@@ -1,5 +1,6 @@
 mod code;
 mod compiler;
+mod value;
 mod vm;
 
 use std::io::Write;

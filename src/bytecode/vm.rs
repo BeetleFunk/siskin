@@ -9,10 +9,9 @@ use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
-use super::code::{
-    self, BoundMethod, Class, Closure, Instance, NativeFunction, OpCode, Upvalue, Value,
-};
+use super::code::{self, OpCode};
 use super::compiler;
+use super::value::{BoundMethod, Class, Closure, Instance, NativeFunction, Upvalue, Value};
 
 const DEBUG_TRACING: bool = false;
 

@@ -4,7 +4,8 @@ use std::result;
 use crate::error::{BasicError, BasicResult};
 use crate::scanner::{Scanner, Token, TokenType};
 
-use super::code::{self, Chunk, Function, OpCode, Value};
+use super::code::{self, Chunk, OpCode};
+use super::value::{Value, Function};
 
 type UnitResult = BasicResult<()>;
 
@@ -486,7 +487,7 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
     let compiled_func = compiler.func_stack.pop().unwrap();
     let constant_index = compiler
         .chunk_mut()
-        .add_constant(compiled_func.definition.into());
+        .add_constant(Value::from(compiled_func.definition));
     compiler.emit_data_op(OpCode::Closure, constant_index);
     for upvalue in compiled_func.upvalues {
         let is_local = if upvalue.is_local { 1 } else { 0 };
