@@ -11,7 +11,7 @@ use crate::error::{BasicError, BasicResult};
 
 use super::code::{self, OpCode};
 use super::compiler;
-use super::value::{BoundMethod, Class, Closure, Instance, NativeFunction, Upvalue, Value};
+use super::value::{BoundMethod, Class, Closure, Instance, NativeFunction, Upvalue, Value, CompiledConstant, CompiledFunction};
 
 const DEBUG_TRACING: bool = false;
 
@@ -176,7 +176,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Constant => {
-                let value = read_constant(state);
+                let constant = read_constant(state);
+                let value = Value::from(constant);
                 state.value_stack.push(value);
             }
             OpCode::Negate => {
@@ -350,28 +351,25 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 call_value(state, callee, arg_count)?;
             }
             OpCode::Closure => {
-                let value = read_constant(state);
-                if let Value::Function(function) = value {
-                    let mut upvalues = Vec::new();
-                    for _ in 0..function.upvalue_count {
-                        let is_local = read_byte(state) != 0;
-                        let slot_index = read_byte(state);
-                        if is_local {
-                            let stack_index = state.frame().locals_base + (slot_index as usize);
-                            upvalues.push(capture_upvalue(state, stack_index));
-                        } else {
-                            // copy the upvalue from the enclosing function (current frame on the top of the call stack)
-                            let enclosing_upvalue =
-                                &state.frame().closure.upvalues[slot_index as usize];
-                            upvalues.push(enclosing_upvalue.clone())
-                        }
+                // TODO: still need Rc for compiled function? Make sure no circular refs possible
+                let function = read_function_constant(state);
+                let mut upvalues = Vec::new();
+                for _ in 0..function.upvalue_count {
+                    let is_local = read_byte(state) != 0;
+                    let slot_index = read_byte(state);
+                    if is_local {
+                        let stack_index = state.frame().locals_base + (slot_index as usize);
+                        upvalues.push(capture_upvalue(state, stack_index));
+                    } else {
+                        // copy the upvalue from the enclosing function (current frame on the top of the call stack)
+                        let enclosing_upvalue =
+                            &state.frame().closure.upvalues[slot_index as usize];
+                        upvalues.push(enclosing_upvalue.clone())
                     }
-                    state
-                        .value_stack
-                        .push(Value::from(Closure { function, upvalues }));
-                } else {
-                    panic!("Expected function constant for OpCode::Closure instruction.");
                 }
+                state
+                    .value_stack
+                    .push(Value::from(Closure { function, upvalues }));
             }
             OpCode::GetUpvalue => {
                 let upvalue_slot = read_byte(state);
@@ -590,24 +588,27 @@ fn read_short(state: &mut State) -> u16 {
     ((high_byte as u16) << 8) + low_byte as u16
 }
 
-fn read_constant(state: &mut State) -> Value {
+fn read_constant(state: &mut State) -> &CompiledConstant {
     let index = read_byte(state);
-    let value = &state.frame().closure.function.chunk.values[index as usize];
-
-    if DEBUG_TRACING {
-        //println!("Constant {index:04} = {value}");
-    }
-
-    // TODO: need to clone this?
-    value.clone()
+    let constant = &state.frame().closure.function.chunk.constants[index as usize];
+    &constant
 }
 
 fn read_string_constant(state: &mut State) -> String {
-    let value = read_constant(state);
-    if let Value::String(string_value) = value {
-        string_value
+    let constant = read_constant(state);
+    if let CompiledConstant::String(string_value) = constant {
+        string_value.to_owned()
     } else {
-        panic!("Expected string value in the constant table.");
+        panic!("Expected string type value in the constant table.");
+    }
+}
+
+fn read_function_constant(state: &mut State) -> Rc<CompiledFunction> {
+    let constant = read_constant(state);
+    if let CompiledConstant::Function(function) = constant {
+        function.clone()
+    } else {
+        panic!("Expected function type value in the constant table.");
     }
 }
 

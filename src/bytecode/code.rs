@@ -1,4 +1,4 @@
-use super::value::Value;
+use super::value::CompiledConstant;
 
 // special identifier strings that may be needed by both compiler and VM
 pub const TYPE_INITIALIZER_METHOD: &str = "init";
@@ -92,10 +92,10 @@ impl From<u8> for OpCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Chunk {
     pub code: Vec<u8>,
-    pub values: Vec<Value>,
+    pub constants: Vec<CompiledConstant>,
     pub line_numbers: Vec<u32>,
 }
 
@@ -103,17 +103,17 @@ impl Chunk {
     pub fn new() -> Self {
         Chunk {
             code: Vec::new(),
-            values: Vec::new(),
+            constants: Vec::new(),
             line_numbers: Vec::new(),
         }
     }
 
-    pub fn add_constant(&mut self, value: Value) -> u8 {
-        let index = self.values.len();
+    pub fn add_constant(&mut self, value: CompiledConstant) -> u8 {
+        let index = self.constants.len();
         if index > u8::MAX.into() {
             panic!("Exceeded maximum number of values in chunk")
         }
-        self.values.push(value);
+        self.constants.push(value);
         index as u8
     }
 
@@ -203,8 +203,8 @@ fn byte_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
 
 fn constant_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
     let index = chunk.code[offset + 1];
-    let value = &chunk.values[index as usize];
-    println!("{opcode_name} {index:04} = {value}");
+    let value = &chunk.constants[index as usize];
+    println!("{opcode_name} {index:04} = {value:?}");
     2
 }
 
@@ -219,10 +219,10 @@ fn short_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
 
 fn closure(chunk: &Chunk, offset: usize, expand_functions: bool) -> usize {
     let function_index = chunk.code[offset + 1];
-    let value = &chunk.values[function_index as usize];
+    let value = &chunk.constants[function_index as usize];
 
-    println!("CLOSURE {function_index:04} = {value}");
-    if let Value::Function(function) = value {
+    println!("CLOSURE {function_index:04} = {value:?}");
+    if let CompiledConstant::Function(function) = value {
         for i in 0..function.upvalue_count {
             let upvalue_offset = offset + 2 + (2 * (i as usize));
             let is_local = chunk.code[upvalue_offset];
@@ -244,8 +244,8 @@ fn closure(chunk: &Chunk, offset: usize, expand_functions: bool) -> usize {
 
 fn invoke_instruction(opcode_name: &str, chunk: &Chunk, offset: usize) -> usize {
     let constant_index = chunk.code[offset + 1];
-    let method_name = &chunk.values[constant_index as usize];
+    let method_name = &chunk.constants[constant_index as usize];
     let arg_count = chunk.code[offset + 2];
-    println!("{opcode_name} ({arg_count} args) {constant_index:04} = {method_name}");
+    println!("{opcode_name} ({arg_count} args) {constant_index:04} = {method_name:?}");
     3
 }

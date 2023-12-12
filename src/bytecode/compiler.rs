@@ -5,7 +5,7 @@ use crate::error::{BasicError, BasicResult};
 use crate::scanner::{Scanner, Token, TokenType};
 
 use super::code::{self, Chunk, OpCode};
-use super::value::{Value, Function};
+use super::value::{CompiledConstant, CompiledFunction};
 
 type UnitResult = BasicResult<()>;
 
@@ -53,7 +53,7 @@ struct Local {
 }
 
 struct CompilerFunction {
-    definition: Function,
+    definition: CompiledFunction,
     locals: Vec<Local>,
     upvalues: Vec<Upvalue>,
     function_type: FunctionType,
@@ -79,7 +79,7 @@ struct Compiler {
 impl Compiler {
     fn new(parser: Parser) -> Compiler {
         // toplevel bytecode for a script will end up in this root function
-        let root_func = Function {
+        let root_func = CompiledFunction {
             arity: 0,
             upvalue_count: 0,
             chunk: Chunk::new(),
@@ -347,7 +347,7 @@ fn get_rule(token_type: TokenType) -> &'static ParseRule {
     &PARSE_TABLE[token_type as usize].1
 }
 
-pub fn compile(source: &str) -> result::Result<Function, BasicError> {
+pub fn compile(source: &str) -> result::Result<CompiledFunction, BasicError> {
     let parser = Parser::new(Scanner::new(source))?;
     let mut compiler = Compiler::new(parser);
 
@@ -396,7 +396,7 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
 
     if compiler.scope_depth == 0 {
         // for global vars, save the variable name as a string in the constant table
-        let index = compiler.chunk_mut().add_constant(Value::from(identifier));
+        let index = compiler.chunk_mut().add_constant(CompiledConstant::from(identifier));
         define_global(compiler, index);
     } else {
         // for local vars, add the identifier name to the list of locals
@@ -423,7 +423,7 @@ fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> Uni
     if compiler.scope_depth == 0 {
         let index = compiler
             .chunk_mut()
-            .add_constant(Value::from(identifier.into_name()));
+            .add_constant(CompiledConstant::from(identifier.into_name()));
         define_global(compiler, index)
     } else {
         // unlike variables, functions and classes are not allowed to replace existing names within the same scope
@@ -446,7 +446,7 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
     compiler.func_stack.push(CompilerFunction {
-        definition: Function {
+        definition: CompiledFunction {
             arity: 0,
             upvalue_count: 0,
             chunk: Chunk::new(),
@@ -487,7 +487,7 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
     let compiled_func = compiler.func_stack.pop().unwrap();
     let constant_index = compiler
         .chunk_mut()
-        .add_constant(Value::from(compiled_func.definition));
+        .add_constant(CompiledConstant::from(compiled_func.definition));
     compiler.emit_data_op(OpCode::Closure, constant_index);
     for upvalue in compiled_func.upvalues {
         let is_local = if upvalue.is_local { 1 } else { 0 };
@@ -544,7 +544,7 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
         .clone();
     let class_name_constant = compiler
         .chunk_mut()
-        .add_constant(Value::from(identifier.extract_name().clone()));
+        .add_constant(CompiledConstant::from(identifier.extract_name().clone()));
     compiler.emit_data_op(OpCode::Class, class_name_constant);
 
     // NOTE: for global vars right now, this will add a duplicate string entry in the constant table with the class name
@@ -607,7 +607,7 @@ fn method(compiler: &mut Compiler) -> UnitResult {
     };
     function(compiler, method_name.clone(), function_type)?;
 
-    let name_constant = compiler.chunk_mut().add_constant(Value::from(method_name));
+    let name_constant = compiler.chunk_mut().add_constant(CompiledConstant::from(method_name));
     compiler.emit_data_op(OpCode::Method, name_constant);
     Ok(())
 }
@@ -839,14 +839,14 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
 }
 
 fn string(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    let value = Value::from(compiler.parser.previous.extract_string().clone());
+    let value = CompiledConstant::from(compiler.parser.previous.extract_string().clone());
     let address = compiler.chunk_mut().add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
 }
 
 fn number(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
-    let value = Value::from(compiler.parser.previous.extract_number());
+    let value = CompiledConstant::from(compiler.parser.previous.extract_number());
     let address = compiler.chunk_mut().add_constant(value);
     compiler.emit_data_op(OpCode::Constant, address);
     Ok(())
@@ -879,7 +879,7 @@ fn super_(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
     }
     compiler.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
     let method_name = compiler.consume(TokenType::Identifier, "Expect superclass method name.")?.extract_name().clone();
-    let method_name = compiler.chunk_mut().add_constant(Value::from(method_name));
+    let method_name = compiler.chunk_mut().add_constant(CompiledConstant::from(method_name));
     load_named_variable(compiler, code::NAME_FOR_SELF);
     if compiler.advance_if_match(TokenType::LeftParen)? {
         // optimization for direct invocation
@@ -919,7 +919,7 @@ fn variable(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
         (OpCode::SetUpvalue, OpCode::GetUpvalue)
     } else {
         // save the global variable name as a string in the constant table
-        index = compiler.chunk_mut().add_constant(Value::from(name));
+        index = compiler.chunk_mut().add_constant(CompiledConstant::from(name));
         (OpCode::SetGlobal, OpCode::GetGlobal)
     };
     // determine whether loading value from or storing value into the variable
@@ -943,7 +943,7 @@ fn load_named_variable(compiler: &mut Compiler, name: &str) {
             OpCode::GetGlobal,
             compiler
                 .chunk_mut()
-                .add_constant(Value::from(name.to_string())),
+                .add_constant(CompiledConstant::from(name.to_string())),
         )
     };
     compiler.emit_data_op(opcode, index);
@@ -966,7 +966,7 @@ fn dot(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
     let property_name = identifier.extract_name().clone();
     let property_name = compiler
         .chunk_mut()
-        .add_constant(Value::from(property_name));
+        .add_constant(CompiledConstant::from(property_name));
 
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
         expression(compiler)?;

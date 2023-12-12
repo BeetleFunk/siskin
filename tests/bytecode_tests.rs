@@ -105,11 +105,16 @@ fn bind_to_global() -> TestResult {
         {
             var a = a;
         }";
-
-    let result = run(code);
-    let error = result.unwrap_err();
+    let error = run(code).unwrap_err();
     assert!(error.description.contains("Undefined variable"));
+    Ok(())
+}
 
+#[test]
+fn set_undefined_global() -> TestResult {
+    let code = "a = 5;";
+    let error = run(code).unwrap_err();
+    assert!(error.description.contains("Undefined variable"));
     Ok(())
 }
 

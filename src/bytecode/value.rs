@@ -9,6 +9,70 @@ use super::code::Chunk;
 
 const TRACE_VALUE_DROP: bool = true;
 
+#[derive(Debug, PartialEq)]
+pub enum CompiledConstant {
+    Bool(bool),
+    Nil,
+    Number(f64),
+    String(String),
+    Function(Rc<CompiledFunction>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CompiledFunction {
+    pub arity: u8,
+    pub upvalue_count: u8,
+    pub chunk: Chunk,
+    pub name: String,
+}
+
+impl From<bool> for CompiledConstant {
+    fn from(boolean: bool) -> CompiledConstant {
+        CompiledConstant::Bool(boolean)
+    }
+}
+
+impl From<f64> for CompiledConstant {
+    fn from(number: f64) -> CompiledConstant {
+        CompiledConstant::Number(number)
+    }
+}
+
+impl From<String> for CompiledConstant {
+    fn from(string: String) -> CompiledConstant {
+        CompiledConstant::String(string)
+    }
+}
+
+impl From<CompiledFunction> for CompiledConstant {
+    fn from(func: CompiledFunction) -> CompiledConstant {
+        CompiledConstant::Function(Rc::new(func))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NewValue {
+    Bool(bool),
+    Nil,
+    Number(f64),
+    String(String),
+    HeapValue(HeapLoc),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeapLoc {
+    index: usize,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum HeapValue {
+    Class(Class),
+    Instance(Instance),
+    BoundMethod(BoundMethod),
+    Closure(Closure),
+    NativeFunction(NativeFunction),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -18,7 +82,7 @@ pub enum Value {
     Class(Rc<Class>),
     Instance(Rc<Instance>),
     BoundMethod(Rc<BoundMethod>), // runtime-only representation of a class method bound to an instance
-    Function(Rc<Function>),       // compile time representation of a function or method
+    //Function(Rc<Function>),       // compile time representation of a function or method
     Closure(Rc<Closure>), // runtime-only representation of a function (may have captured variables)
     NativeFunction(Rc<NativeFunction>),
 }
@@ -37,11 +101,23 @@ impl fmt::Display for Value {
                 Self::Class(value) => value.name.clone(),
                 Self::Instance(value) => value.class.name.clone() + " instance",
                 Self::BoundMethod(value) => format!("{} bound to instance of {}", value.closure.function.name, value.instance.class.name),
-                Self::Function(value) => value.name.clone(),
+                //Self::Function(value) => value.name.clone(),
                 Self::Closure(value) => value.function.name.clone(),
                 Self::NativeFunction(value) => value.name.clone(),
             }
         )
+    }
+}
+
+impl From<&CompiledConstant> for Value {
+    fn from(constant: &CompiledConstant) -> Value {
+        match constant {
+            CompiledConstant::Bool(value) => Value::Bool(*value),
+            CompiledConstant::Nil => Value::Nil,
+            CompiledConstant::Number(value) => Value::Number(*value),
+            CompiledConstant::String(value) => Value::String(value.clone()),
+            CompiledConstant::Function(_) => panic!("Compiled function must go through CLOSURE instruction to create runtime value."),
+        }
     }
 }
 
@@ -81,11 +157,11 @@ impl From<BoundMethod> for Value {
     }
 }
 
-impl From<Function> for Value {
-    fn from(func: Function) -> Value {
-        Value::Function(Rc::new(func))
-    }
-}
+// impl From<Function> for Value {
+//     fn from(func: Function) -> Value {
+//         Value::Function(Rc::new(func))
+//     }
+// }
 
 impl From<Closure> for Value {
     fn from(closure: Closure) -> Value {
@@ -118,16 +194,8 @@ pub struct BoundMethod {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Function {
-    pub arity: u8,
-    pub upvalue_count: u8,
-    pub chunk: Chunk,
-    pub name: String,
-}
-
-#[derive(Debug, PartialEq)]
 pub struct Closure {
-    pub function: Rc<Function>,
+    pub function: Rc<CompiledFunction>,
     pub upvalues: Vec<Rc<Upvalue>>,
 }
 
