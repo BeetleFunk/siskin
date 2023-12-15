@@ -5,50 +5,9 @@ use std::rc::Rc;
 
 use crate::error::BasicResult;
 
-use super::code::Chunk;
+use super::code::{CompiledConstant, CompiledFunction};
 
 const TRACE_VALUE_DROP: bool = true;
-
-#[derive(Debug, PartialEq)]
-pub enum CompiledConstant {
-    Bool(bool),
-    Nil,
-    Number(f64),
-    String(String),
-    Function(Rc<CompiledFunction>),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct CompiledFunction {
-    pub arity: u8,
-    pub upvalue_count: u8,
-    pub chunk: Chunk,
-    pub name: String,
-}
-
-impl From<bool> for CompiledConstant {
-    fn from(boolean: bool) -> CompiledConstant {
-        CompiledConstant::Bool(boolean)
-    }
-}
-
-impl From<f64> for CompiledConstant {
-    fn from(number: f64) -> CompiledConstant {
-        CompiledConstant::Number(number)
-    }
-}
-
-impl From<String> for CompiledConstant {
-    fn from(string: String) -> CompiledConstant {
-        CompiledConstant::String(string)
-    }
-}
-
-impl From<CompiledFunction> for CompiledConstant {
-    fn from(func: CompiledFunction) -> CompiledConstant {
-        CompiledConstant::Function(Rc::new(func))
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NewValue {
@@ -56,12 +15,66 @@ pub enum NewValue {
     Nil,
     Number(f64),
     String(String),
-    HeapValue(HeapLoc),
+    HeapValue(HeapRef),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct HeapLoc {
-    index: usize,
+impl From<bool> for NewValue {
+    fn from(boolean: bool) -> NewValue {
+        NewValue::Bool(boolean)
+    }
+}
+
+impl From<f64> for NewValue {
+    fn from(number: f64) -> NewValue {
+        NewValue::Number(number)
+    }
+}
+
+impl From<String> for NewValue {
+    fn from(string: String) -> NewValue {
+        NewValue::String(string)
+    }
+}
+
+impl From<HeapRef> for NewValue {
+    fn from(location: HeapRef) -> NewValue {
+        NewValue::HeapValue(location)
+    }
+}
+
+
+impl fmt::Display for NewValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Bool(value) => value.to_string(),
+                Self::Nil => "Nil".to_string(),
+                Self::Number(value) => value.to_string(),
+                Self::String(value) => value.clone(),
+                Self::HeapValue(location) => location.index.to_string(),
+            }
+        )
+    }
+}
+
+impl From<&CompiledConstant> for NewValue {
+    fn from(constant: &CompiledConstant) -> NewValue {
+        match constant {
+            CompiledConstant::Bool(value) => NewValue::Bool(*value),
+            CompiledConstant::Nil => NewValue::Nil,
+            CompiledConstant::Number(value) => NewValue::Number(*value),
+            CompiledConstant::String(value) => NewValue::String(value.clone()),
+            CompiledConstant::Function(_) => panic!("Compiled function must go through CLOSURE instruction to create runtime value."),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeapRef {
+    pub index: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -73,124 +86,52 @@ pub enum HeapValue {
     NativeFunction(NativeFunction),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Bool(bool),
-    Nil,
-    Number(f64),
-    String(String),
-    Class(Rc<Class>),
-    Instance(Rc<Instance>),
-    BoundMethod(Rc<BoundMethod>), // runtime-only representation of a class method bound to an instance
-    //Function(Rc<Function>),       // compile time representation of a function or method
-    Closure(Rc<Closure>), // runtime-only representation of a function (may have captured variables)
-    NativeFunction(Rc<NativeFunction>),
-}
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::Bool(value) => value.to_string(),
-                Self::Nil => "Nil".to_string(),
-                Self::Number(value) => value.to_string(),
-                // TODO: avoid cloning strings for these cases
-                Self::String(value) => value.clone(),
-                Self::Class(value) => value.name.clone(),
-                Self::Instance(value) => value.class.name.clone() + " instance",
-                Self::BoundMethod(value) => format!("{} bound to instance of {}", value.closure.function.name, value.instance.class.name),
-                //Self::Function(value) => value.name.clone(),
-                Self::Closure(value) => value.function.name.clone(),
-                Self::NativeFunction(value) => value.name.clone(),
-            }
-        )
+impl From<Class> for HeapValue {
+    fn from(class: Class) -> HeapValue {
+        HeapValue::Class(class)
     }
 }
 
-impl From<&CompiledConstant> for Value {
-    fn from(constant: &CompiledConstant) -> Value {
-        match constant {
-            CompiledConstant::Bool(value) => Value::Bool(*value),
-            CompiledConstant::Nil => Value::Nil,
-            CompiledConstant::Number(value) => Value::Number(*value),
-            CompiledConstant::String(value) => Value::String(value.clone()),
-            CompiledConstant::Function(_) => panic!("Compiled function must go through CLOSURE instruction to create runtime value."),
-        }
+impl From<Instance> for HeapValue {
+    fn from(instance: Instance) -> HeapValue {
+        HeapValue::Instance(instance)
     }
 }
 
-impl From<bool> for Value {
-    fn from(boolean: bool) -> Value {
-        Value::Bool(boolean)
+impl From<BoundMethod> for HeapValue {
+    fn from(method: BoundMethod) -> HeapValue {
+        HeapValue::BoundMethod(method)
     }
 }
 
-impl From<f64> for Value {
-    fn from(number: f64) -> Value {
-        Value::Number(number)
+impl From<Closure> for HeapValue {
+    fn from(closure: Closure) -> HeapValue {
+        HeapValue::Closure(closure)
     }
 }
 
-impl From<String> for Value {
-    fn from(string: String) -> Value {
-        Value::String(string)
-    }
-}
-
-impl From<Class> for Value {
-    fn from(class: Class) -> Value {
-        Value::Class(Rc::new(class))
-    }
-}
-
-impl From<Instance> for Value {
-    fn from(instance: Instance) -> Value {
-        Value::Instance(Rc::new(instance))
-    }
-}
-
-impl From<BoundMethod> for Value {
-    fn from(method: BoundMethod) -> Value {
-        Value::BoundMethod(Rc::new(method))
-    }
-}
-
-// impl From<Function> for Value {
-//     fn from(func: Function) -> Value {
-//         Value::Function(Rc::new(func))
-//     }
-// }
-
-impl From<Closure> for Value {
-    fn from(closure: Closure) -> Value {
-        Value::Closure(Rc::new(closure))
-    }
-}
-
-impl From<NativeFunction> for Value {
-    fn from(func: NativeFunction) -> Value {
-        Value::NativeFunction(Rc::new(func))
+impl From<NativeFunction> for HeapValue {
+    fn from(func: NativeFunction) -> HeapValue {
+        HeapValue::NativeFunction(func)
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Class {
     pub name: String,
-    pub methods: RefCell<HashMap<String, Rc<Closure>>>,
+    pub methods: HashMap<String, HeapRef>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Instance {
     pub class: Rc<Class>,
-    pub fields: RefCell<HashMap<String, Value>>,
+    pub fields: HashMap<String, NewValue>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct BoundMethod {
-    pub instance: Rc<Instance>,
-    pub closure: Rc<Closure>,
+    pub instance: HeapRef,
+    pub closure: HeapRef,
 }
 
 #[derive(Debug, PartialEq)]
@@ -202,12 +143,12 @@ pub struct Closure {
 #[derive(Debug, PartialEq)]
 pub struct Upvalue {
     pub stack_index: usize, // the location in the value stack if this upvalue has not yet been closed
-    pub closed: RefCell<Option<Value>>, // the closed value once it has been moved to the heap
+    pub closed: RefCell<Option<NewValue>>, // the closed value once it has been moved to the heap
 }
 
 pub struct NativeFunction {
     pub arity: u8,
-    pub func: fn(arguments: &[Value]) -> BasicResult<Value>,
+    pub func: fn(arguments: &[NewValue]) -> BasicResult<NewValue>,
     pub name: String,
 }
 
@@ -235,7 +176,7 @@ impl Drop for Class {
             println!(
                 "Dropping class {} with {} methods.",
                 self.name,
-                self.methods.borrow().len()
+                self.methods.len()
             );
         }
     }
@@ -247,7 +188,7 @@ impl Drop for Instance {
             println!(
                 "Dropping instance of {} with {} fields",
                 self.class.name,
-                self.fields.borrow().len()
+                self.fields.len()
             );
         }
     }
@@ -260,6 +201,18 @@ impl Drop for Closure {
                 "Dropping closure for function {} with {} upvalues",
                 self.function.name,
                 self.upvalues.len()
+            );
+        }
+    }
+}
+
+impl Drop for BoundMethod {
+    fn drop(&mut self) {
+        if TRACE_VALUE_DROP {
+            println!(
+                "Dropping bound method - instance at {}, closure at {}",
+                self.instance.index,
+                self.closure.index
             );
         }
     }

@@ -4,8 +4,7 @@ use std::result;
 use crate::error::{BasicError, BasicResult};
 use crate::scanner::{Scanner, Token, TokenType};
 
-use super::code::{self, Chunk, OpCode};
-use super::value::{CompiledConstant, CompiledFunction};
+use super::code::{self, Chunk, CompiledConstant, CompiledFunction, OpCode};
 
 type UnitResult = BasicResult<()>;
 

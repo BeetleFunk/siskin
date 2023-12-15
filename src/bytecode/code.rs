@@ -1,4 +1,4 @@
-use super::value::CompiledConstant;
+use std::rc::Rc;
 
 // special identifier strings that may be needed by both compiler and VM
 pub const TYPE_INITIALIZER_METHOD: &str = "init";
@@ -89,6 +89,47 @@ const OP_TABLE: [OpCode; 37] = [
 impl From<u8> for OpCode {
     fn from(val: u8) -> OpCode {
         OP_TABLE[val as usize]
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum CompiledConstant {
+    Bool(bool),
+    Nil,
+    Number(f64),
+    String(String),
+    Function(Rc<CompiledFunction>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CompiledFunction {
+    pub arity: u8,
+    pub upvalue_count: u8,
+    pub chunk: Chunk,
+    pub name: String,
+}
+
+impl From<bool> for CompiledConstant {
+    fn from(boolean: bool) -> CompiledConstant {
+        CompiledConstant::Bool(boolean)
+    }
+}
+
+impl From<f64> for CompiledConstant {
+    fn from(number: f64) -> CompiledConstant {
+        CompiledConstant::Number(number)
+    }
+}
+
+impl From<String> for CompiledConstant {
+    fn from(string: String) -> CompiledConstant {
+        CompiledConstant::String(string)
+    }
+}
+
+impl From<CompiledFunction> for CompiledConstant {
+    fn from(func: CompiledFunction) -> CompiledConstant {
+        CompiledConstant::Function(Rc::new(func))
     }
 }
 
