@@ -95,7 +95,6 @@ impl From<u8> for OpCode {
 #[derive(Debug, PartialEq)]
 pub enum CompiledConstant {
     Bool(bool),
-    Nil,
     Number(f64),
     String(String),
     Function(Rc<CompiledFunction>),
@@ -226,7 +225,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize, expand_functions: b
         OpCode::Invoke => invoke_instruction("Invoke", chunk, offset),
         OpCode::Inherit => simple_instruction("Inherit"),
         OpCode::GetSuper => constant_instruction("GetSuper", chunk, offset),
-        OpCode::SuperInvoke => invoke_instruction("SuperInvoke", chunk, offset)
+        OpCode::SuperInvoke => invoke_instruction("SuperInvoke", chunk, offset),
     }
 }
 

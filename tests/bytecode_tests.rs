@@ -789,6 +789,30 @@ fn type_init_invalid_return() -> TestResult {
 }
 
 #[test]
+fn bound_method_invocation() -> TestResult {
+    let code = "\
+        class Dynamite {
+            init() {
+                this.result = \"Boom!\";
+            }
+
+            boom() {
+                print this.result;
+            }
+        }
+        var stick = Dynamite();
+        var boundMethod = stick.boom;
+        boundMethod();";
+
+    let output = run(code)?;
+    assert_eq!(
+        "Boom!\n",
+        output
+    );
+    Ok(())
+}
+
+#[test]
 fn method_invocation_optimization() -> TestResult {
     let code = "\
         class Dynamite {
