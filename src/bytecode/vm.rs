@@ -54,6 +54,62 @@ impl State {
     }
 }
 
+fn mark_reachable_heap(state: &mut State) {
+    let stack_refs = state.value_stack.iter().filter_map(|v| {
+        if let NewValue::HeapValue(loc) = v {
+            Some(*loc)
+        } else {
+            None
+        }
+    });
+
+    let upvalue_refs = state.open_upvalues.iter().filter_map(|v| {
+        if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
+            Some(loc)
+        } else {
+            None
+        }
+    });
+
+    // TODO: also chain globals, call stack closure upvalues, and anything else that could hold a heap reference
+    let all_refs = stack_refs.chain(upvalue_refs);
+
+    for loc in all_refs {
+        mark_heap_entry(&mut state.value_heap, loc);
+    }
+}
+
+// TODO: prototyping the traversal here, merge this with the HeapEntry data type changes
+fn mark_heap_entry(heap: &mut [HeapValue], loc: HeapRef) {
+    // TODO: if marked already, bail immediately
+    
+    // TODO: mark the heap entry here
+
+    match &heap[loc.index] {
+        HeapValue::Class(class) => {
+            class.methods.values().for_each(|v| mark_heap_entry(heap, *v));
+        }
+        HeapValue::Instance(instance) => {
+            mark_heap_entry(heap, instance.class);
+            instance.fields.values().filter_map(|v| {
+                if let NewValue::HeapValue(loc) = v { Some(loc) } else { None }
+            }).for_each(|v| mark_heap_entry(heap, *v));
+        }
+        _ => {}
+        // HeapValue::BoundMethod(boundMethod),
+        // HeapValue::Closure(closure),
+        // HeapValue::NativeFunction(function),
+    }
+
+    // recurse here???
+
+    // just do some silly mutation for testing right now
+    heap[loc.index] = HeapValue::BoundMethod(BoundMethod {
+        instance: loc,
+        closure: loc,
+    });
+}
+
 fn setup_standard_library(state: &mut State) {
     let library = [
         NativeFunction {
@@ -170,6 +226,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             let frame = state.frame();
             code::disassemble_instruction(&frame.closure.function.chunk, frame.ip, false);
         }
+
+        mark_reachable_heap(state);
 
         let opcode: OpCode = read_byte(state).into();
         match opcode {
