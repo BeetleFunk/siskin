@@ -7,7 +7,7 @@ use crate::error::BasicResult;
 
 use super::code::{CompiledConstant, CompiledFunction};
 
-const TRACE_VALUE_DROP: bool = true;
+const TRACE_VALUE_DROP: bool = false;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NewValue {
@@ -58,6 +58,11 @@ impl From<&CompiledConstant> for NewValue {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeapRef {
     pub index: usize,
+}
+
+pub struct HeapEntry {
+    pub marked: bool,
+    pub value: HeapValue
 }
 
 #[derive(Debug, PartialEq)]
@@ -148,7 +153,7 @@ pub struct Upvalue {
 
 pub struct NativeFunction {
     pub arity: u8,
-    pub func: fn(heap: &[HeapValue], arguments: &[NewValue]) -> BasicResult<NewValue>,
+    pub func: fn(heap: &[HeapEntry], arguments: &[NewValue]) -> BasicResult<NewValue>,
     pub name: String,
 }
 

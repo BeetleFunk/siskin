@@ -12,7 +12,7 @@ use crate::error::{BasicError, BasicResult};
 use super::code::{self, CompiledConstant, CompiledFunction, OpCode};
 use super::compiler;
 use super::value::{
-    BoundMethod, Class, Closure, HeapRef, HeapValue, Instance, NativeFunction, NewValue, Upvalue,
+    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, NativeFunction, NewValue, Upvalue,
 };
 
 const DEBUG_TRACING: bool = false;
@@ -25,7 +25,7 @@ static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 struct State {
     call_stack: Vec<CallFrame>,
     value_stack: Vec<NewValue>,
-    value_heap: Vec<HeapValue>,
+    value_heap: Vec<HeapEntry>,
     globals: HashMap<String, NewValue>,
     open_upvalues: Vec<Rc<Upvalue>>,
 }
@@ -76,6 +76,11 @@ fn setup_standard_library(state: &mut State) {
             func: native_sleep,
             name: "sleep".to_string(),
         },
+        NativeFunction {
+            arity: 0,
+            func: native_heap_check,
+            name: "getNumHeapEntries".to_string(),
+        },
     ];
 
     // add standard library native functions into the globals
@@ -86,7 +91,7 @@ fn setup_standard_library(state: &mut State) {
     }
 }
 
-fn native_clock(_heap: &[HeapValue], _args: &[NewValue]) -> BasicResult<NewValue> {
+fn native_clock(_heap: &[HeapEntry], _args: &[NewValue]) -> BasicResult<NewValue> {
     // make sure epoch is initialized first (lazy init)
     let epoch = *EPOCH;
     let duration = Instant::now() - epoch;
@@ -94,7 +99,7 @@ fn native_clock(_heap: &[HeapValue], _args: &[NewValue]) -> BasicResult<NewValue
     Ok((duration.as_millis() as f64).into())
 }
 
-fn native_sqrt(_heap: &[HeapValue], args: &[NewValue]) -> BasicResult<NewValue> {
+fn native_sqrt(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> {
     if let NewValue::Number(value) = args[0] {
         Ok(NewValue::from(value.sqrt()))
     } else {
@@ -104,11 +109,11 @@ fn native_sqrt(_heap: &[HeapValue], args: &[NewValue]) -> BasicResult<NewValue> 
     }
 }
 
-fn native_to_string(heap: &[HeapValue], args: &[NewValue]) -> BasicResult<NewValue> {
+fn native_to_string(heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> {
     Ok(NewValue::from(value_to_string(heap, &args[0])))
 }
 
-fn native_sleep(_heap: &[HeapValue], args: &[NewValue]) -> BasicResult<NewValue> {
+fn native_sleep(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> {
     if let NewValue::Number(value) = args[0] {
         if value < 0.0 {
             return Err(BasicError::new(
@@ -123,6 +128,10 @@ fn native_sleep(_heap: &[HeapValue], args: &[NewValue]) -> BasicResult<NewValue>
             "Expected number argument for sleep function.",
         ))
     }
+}
+
+fn native_heap_check(heap: &[HeapEntry], _args: &[NewValue]) -> BasicResult<NewValue> {
+    Ok(NewValue::Number(heap.len() as f64))
 }
 
 struct CallFrame {
@@ -363,7 +372,6 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 call_value(state, callee, arg_count)?;
             }
             OpCode::Closure => {
-                // TODO: still need Rc for compiled function? Make sure no circular refs possible
                 let function = read_function_constant(state);
                 let mut upvalues = Vec::new();
                 for _ in 0..function.upvalue_count {
@@ -527,7 +535,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
                 if let Some((_, superclass)) = stack_peek_class(state) {
                     let base_methods = superclass.methods.clone();
-                    if let HeapValue::Class(subclass) = &mut state.value_heap[subclass.index] {
+                    if let HeapValue::Class(subclass) = &mut state.value_heap[subclass.index].value {
                         subclass.methods.extend(base_methods)
                     } else {
                         panic!("Inherit instruction expects a class type value to be on top of the stack.");
@@ -638,7 +646,7 @@ fn call_value(state: &mut State, callee: NewValue, arg_count: u8) -> BasicResult
         ));
     };
 
-    let callee = &state.value_heap[heap_location.index];
+    let callee = &state.value_heap[heap_location.index].value;
 
     // this should point to the current location of the callee on the stack, regular arguments will begin in slot 1 relative to this base pointer
     let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
@@ -831,7 +839,7 @@ fn build_error(message: &str, line: u32) -> BasicError {
 }
 
 fn place_on_heap(state: &mut State, value: HeapValue) -> NewValue {
-    state.value_heap.push(value);
+    state.value_heap.push(HeapEntry { value, marked: false });
     NewValue::from(HeapRef {
         index: state.value_heap.len() - 1,
     })
@@ -840,7 +848,7 @@ fn place_on_heap(state: &mut State, value: HeapValue) -> NewValue {
 fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapValue)> {
     let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
     if let NewValue::HeapValue(location) = stack_entry {
-        Some((*location, &state.value_heap[location.index]))
+        Some((*location, &state.value_heap[location.index].value))
     } else {
         None
     }
@@ -849,7 +857,7 @@ fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapV
 fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let top = state.value_stack.last().unwrap();
     if let NewValue::HeapValue(location) = top {
-        Some((*location, &mut state.value_heap[location.index]))
+        Some((*location, &mut state.value_heap[location.index].value))
     } else {
         None
     }
@@ -858,7 +866,7 @@ fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValu
 fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
     let popped = state.value_stack.pop().unwrap();
     if let NewValue::HeapValue(location) = popped {
-        Some((location, &state.value_heap[location.index]))
+        Some((location, &state.value_heap[location.index].value))
     } else {
         None
     }
@@ -867,7 +875,7 @@ fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
 fn stack_pop_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let popped = state.value_stack.pop().unwrap();
     if let NewValue::HeapValue(location) = popped {
-        Some((location, &mut state.value_heap[location.index]))
+        Some((location, &mut state.value_heap[location.index].value))
     } else {
         None
     }
@@ -928,7 +936,7 @@ fn stack_peek_class_mut(state: &mut State) -> Option<(HeapRef, &mut Class)> {
 }
 
 fn get_closure(state: &State, location: HeapRef) -> &Rc<Closure> {
-    if let HeapValue::Closure(closure) = &state.value_heap[location.index] {
+    if let HeapValue::Closure(closure) = &state.value_heap[location.index].value {
         closure
     } else {
         panic!("Expected closure at heap index {}", location.index);
@@ -936,14 +944,14 @@ fn get_closure(state: &State, location: HeapRef) -> &Rc<Closure> {
 }
 
 fn get_class(state: &State, location: HeapRef) -> &Class {
-    if let HeapValue::Class(class) = &state.value_heap[location.index] {
+    if let HeapValue::Class(class) = &state.value_heap[location.index].value {
         class
     } else {
         panic!("Expected class at heap index {}", location.index);
     }
 }
 
-fn value_to_string(heap: &[HeapValue], value: &NewValue) -> String {
+fn value_to_string(heap: &[HeapEntry], value: &NewValue) -> String {
     match value {
         NewValue::Bool(value) => value.to_string(),
         NewValue::Nil => "Nil".to_string(),
@@ -951,7 +959,7 @@ fn value_to_string(heap: &[HeapValue], value: &NewValue) -> String {
         NewValue::String(value) => value.clone(),
         NewValue::HeapValue(location) => {
             let heap_entry = &heap[location.index];
-            heap_entry.to_string()
+            heap_entry.value.to_string()
         }
     }
 }
