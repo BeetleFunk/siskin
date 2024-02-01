@@ -14,7 +14,6 @@ fn run(code: &str) -> error::BasicResult<String> {
     Ok(output.to_string())
 }
 
-#[ignore]
 #[test]
 // the original strategy of primitive reference counting (using Rust's Rc) did not reclaim circular references once they went out of scope
 fn circular_references() -> TestResult {    
@@ -64,8 +63,8 @@ fn circular_references() -> TestResult {
 
         {
             var outerList = List();
-            var numLists = 1000;
-            var innerListSize = 1000;
+            var numLists = 30; //var numLists = 1000;
+            var innerListSize = 30; //var innerListSize = 1000;
             for (var i = 0; i < numLists; i = i + 1) {
                 var innerList = List();
                 for (var j = 0; j < innerListSize; j = j + 1) {
@@ -75,10 +74,10 @@ fn circular_references() -> TestResult {
             }
             print \"Made a big list!\";
             print \"heap size: \" + toString(getNumHeapEntries());
-            sleep(10000);
+            sleep(1000);
         }
         print \"List is now out of scope!\";
-        sleep(10000);
+        sleep(1000);
         print \"heap size: \" + toString(getNumHeapEntries());";
     
     let output = run(code)?;

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
@@ -12,7 +13,8 @@ use crate::error::{BasicError, BasicResult};
 use super::code::{self, CompiledConstant, CompiledFunction, OpCode};
 use super::compiler;
 use super::value::{
-    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, NativeFunction, NewValue, Upvalue,
+    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, NativeFunction, NewValue,
+    Upvalue,
 };
 
 const DEBUG_TRACING: bool = false;
@@ -51,6 +53,122 @@ impl State {
     // the current call frame (mut)
     fn frame_mut(&mut self) -> &mut CallFrame {
         self.call_stack.last_mut().unwrap()
+    }
+}
+
+fn collect_garbage(state: &mut State) {
+    mark_reachable_heap(state);
+
+    let mut open_slots = Vec::new();
+    for (current_index, entry) in state.value_heap.iter_mut().enumerate() {
+        let marked = entry.marked.replace(false);
+        if !marked {
+            open_slots.push(current_index)
+        }
+    }
+
+    // TODO: do real cleanup here instead
+
+    let marked_count = state.value_heap.len() - open_slots.len();
+
+    println!(
+        "Marked {} out of {} entries",
+        marked_count,
+        state.value_heap.len()
+    );
+}
+
+fn mark_reachable_heap(state: &State) {
+    let global_refs = state.globals.values().filter_map(|v| {
+        if let NewValue::HeapValue(loc) = v {
+            Some(*loc)
+        } else {
+            None
+        }
+    });
+    let stack_refs = state.value_stack.iter().filter_map(|v| {
+        if let NewValue::HeapValue(loc) = v {
+            Some(*loc)
+        } else {
+            None
+        }
+    });
+    let open_upvalue_refs = state.open_upvalues.iter().filter_map(|v| {
+        if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
+            Some(loc)
+        } else {
+            None
+        }
+    });
+    let call_stack_captured_refs = state.call_stack.iter().flat_map(|v| {
+        v.closure.upvalues.iter().filter_map(|v| {
+            if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
+                Some(loc)
+            } else {
+                None
+            }
+        })
+    });
+
+    let all_refs = global_refs
+        .chain(stack_refs)
+        .chain(open_upvalue_refs)
+        .chain(call_stack_captured_refs);
+
+    for loc in all_refs {
+        mark_heap_entry(&state.value_heap, loc);
+    }
+}
+
+// marks the given entry and all entries referenced by it
+fn mark_heap_entry(heap: &[HeapEntry], loc: HeapRef) {
+    let already_marked = heap[loc.index].marked.replace(true);
+    // no need to mark children if this entry has already been processed
+    if already_marked {
+        return;
+    }
+
+    match &heap[loc.index].value {
+        HeapValue::Class(class) => {
+            class
+                .methods
+                .values()
+                .for_each(|v| mark_heap_entry(heap, *v));
+        }
+        HeapValue::Instance(instance) => {
+            mark_heap_entry(heap, instance.class);
+            instance
+                .fields
+                .values()
+                .filter_map(|v| {
+                    if let NewValue::HeapValue(loc) = v {
+                        Some(loc)
+                    } else {
+                        None
+                    }
+                })
+                .for_each(|loc| mark_heap_entry(heap, *loc));
+        }
+        HeapValue::BoundMethod(method) => {
+            mark_heap_entry(heap, method.instance);
+            mark_heap_entry(heap, method.closure);
+        }
+        HeapValue::Closure(closure) => {
+            closure
+                .upvalues
+                .iter()
+                .filter_map(|v| {
+                    if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
+                        Some(loc)
+                    } else {
+                        None
+                    }
+                })
+                .for_each(|loc| mark_heap_entry(heap, loc));
+        }
+        HeapValue::NativeFunction(_) => {
+            // native functions don't have any heap references
+        }
     }
 }
 
@@ -535,7 +653,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
                 if let Some((_, superclass)) = stack_peek_class(state) {
                     let base_methods = superclass.methods.clone();
-                    if let HeapValue::Class(subclass) = &mut state.value_heap[subclass.index].value {
+                    if let HeapValue::Class(subclass) = &mut state.value_heap[subclass.index].value
+                    {
                         subclass.methods.extend(base_methods)
                     } else {
                         panic!("Inherit instruction expects a class type value to be on top of the stack.");
@@ -585,6 +704,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 };
             }
         }
+
+        // TODO: determine proper time to run this
+        collect_garbage(state);
     }
 
     Ok(())
@@ -839,7 +961,10 @@ fn build_error(message: &str, line: u32) -> BasicError {
 }
 
 fn place_on_heap(state: &mut State, value: HeapValue) -> NewValue {
-    state.value_heap.push(HeapEntry { value, marked: false });
+    state.value_heap.push(HeapEntry {
+        value,
+        marked: Cell::new(false),
+    });
     NewValue::from(HeapRef {
         index: state.value_heap.len() - 1,
     })

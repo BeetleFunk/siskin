@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -61,7 +62,7 @@ pub struct HeapRef {
 }
 
 pub struct HeapEntry {
-    pub marked: bool,
+    pub marked: Cell<bool>,
     pub value: HeapValue
 }
 
