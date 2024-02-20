@@ -8,7 +8,7 @@ use super::code::{self, Chunk, CompiledConstant, CompiledFunction, OpCode};
 
 type UnitResult = BasicResult<()>;
 
-const DEBUG_DUMP_CHUNK: bool = true;
+const DEBUG_DUMP_CHUNK: bool = false;
 
 struct Parser {
     scanner: Scanner,

@@ -131,7 +131,7 @@ fn collect_garbage(state: &mut State) {
 
     // TODO: need to remap all heap references at the roots as well (the sources used in mark_reachable_heap())
 
-    println!("Marked {} out of {} entries", new_heap_size, old_heap_size);
+    //println!("Marked {} out of {} entries", new_heap_size, old_heap_size);
 }
 
 fn mark_reachable_heap(state: &State) {
