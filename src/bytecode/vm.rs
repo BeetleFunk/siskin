@@ -61,21 +61,77 @@ fn collect_garbage(state: &mut State) {
 
     let mut open_slots = Vec::new();
     for (current_index, entry) in state.value_heap.iter_mut().enumerate() {
-        let marked = entry.marked.replace(false);
-        if !marked {
+        if !entry.marked.get() {
             open_slots.push(current_index)
         }
     }
+    let new_heap_size = state.value_heap.len() - open_slots.len();
+    let old_heap_size = state.value_heap.len();
 
-    // TODO: do real cleanup here instead
+    // remap any marked heap values past the new capacity and then trim to that capacity
+    let mut current_open_slot = 0;
+    let mut remapping = HashMap::new();
+    for index in new_heap_size..state.value_heap.len() {
+        if state.value_heap[index].marked.get() {
+            state.value_heap.swap(index, open_slots[current_open_slot]);
+            remapping.insert(index, open_slots[current_open_slot]);
+            current_open_slot += 1;
+        }
+    }
 
-    let marked_count = state.value_heap.len() - open_slots.len();
+    state.value_heap.truncate(new_heap_size);
 
-    println!(
-        "Marked {} out of {} entries",
-        marked_count,
-        state.value_heap.len()
-    );
+    for entry in state.value_heap.iter_mut() {
+        // reset the marked state for next time GC occurs
+        entry.marked.set(false);
+
+        // remap all references to heap entries that were relocated
+        match &mut entry.value {
+            HeapValue::Class(class) => {
+                for heap_ref in class.methods.values_mut() {
+                    if let Some(new_index) = remapping.get(&heap_ref.index) {
+                        heap_ref.index = *new_index;
+                    }
+                }
+            }
+            HeapValue::Instance(instance) => {
+                if let Some(new_index) = remapping.get(&instance.class.index) {
+                    instance.class.index = *new_index;
+                }
+                for value in instance.fields.values_mut() {
+                    if let NewValue::HeapValue(heap_ref) = value {
+                        if let Some(new_index) = remapping.get(&heap_ref.index) {
+                            heap_ref.index = *new_index;
+                        }
+                    }
+                }
+            }
+            HeapValue::BoundMethod(method) => {
+                if let Some(new_index) = remapping.get(&method.instance.index) {
+                    method.instance.index = *new_index;
+                }
+                if let Some(new_index) = remapping.get(&method.closure.index) {
+                    method.closure.index = *new_index;
+                }
+            }
+            HeapValue::Closure(closure) => {
+                for upvalue in &closure.upvalues {
+                    if let Some(NewValue::HeapValue(mut heap_ref)) = *upvalue.closed.borrow_mut() {
+                        if let Some(new_index) = remapping.get(&heap_ref.index) {
+                            heap_ref.index = *new_index;
+                        }
+                    }
+                }
+            }
+            HeapValue::NativeFunction(_) => {
+                // native functions don't have any heap references
+            }
+        }
+    }
+
+    // TODO: need to remap all heap references at the roots as well (the sources used in mark_reachable_heap())
+
+    println!("Marked {} out of {} entries", new_heap_size, old_heap_size);
 }
 
 fn mark_reachable_heap(state: &State) {
