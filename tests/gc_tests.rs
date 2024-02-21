@@ -133,7 +133,8 @@ fn relocated_heap_references() -> TestResult {
             }
         }
         var global1 = Node(1);
-        var global2 = Node(2);
+        var global2 = global1;
+        var global3;
         {
             var outerList = List();
             var numLists = 16;
@@ -148,11 +149,13 @@ fn relocated_heap_references() -> TestResult {
             print \"Made a big list!\";
             print \"heap size: \" + toString(getNumHeapEntries());
             global2 = Node(3);
+            global3 = Node(5);
         }
         print \"List is now out of scope!\";
         print \"heap size: \" + toString(getNumHeapEntries());
         print \"Read global1.value: \" + toString(global1.value);
-        print \"Read global2.value: \" + toString(global2.value);";
+        print \"Read global2.value: \" + toString(global2.value);
+        print \"Read global3.value: \" + toString(global3.value);";
     
     let output = run(code)?;
     println!("{output}");

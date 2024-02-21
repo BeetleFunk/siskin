@@ -68,7 +68,7 @@ fn collect_garbage(state: &mut State) {
     let new_heap_size = state.value_heap.len() - open_slots.len();
     let old_heap_size = state.value_heap.len();
 
-    // remap any marked heap values past the new capacity and then trim to that capacity
+    // relocate any marked heap values past the new capacity and then trim to that capacity
     let mut current_open_slot = 0;
     let mut remapping = HashMap::new();
     for index in new_heap_size..state.value_heap.len() {
@@ -81,57 +81,11 @@ fn collect_garbage(state: &mut State) {
 
     state.value_heap.truncate(new_heap_size);
 
-    for entry in state.value_heap.iter_mut() {
-        // reset the marked state for next time GC occurs
-        entry.marked.set(false);
+    remap_heap_refs(state, &remapping);
 
-        // remap all references to heap entries that were relocated
-        match &mut entry.value {
-            HeapValue::Class(class) => {
-                for heap_ref in class.methods.values_mut() {
-                    if let Some(new_index) = remapping.get(&heap_ref.index) {
-                        heap_ref.index = *new_index;
-                    }
-                }
-            }
-            HeapValue::Instance(instance) => {
-                if let Some(new_index) = remapping.get(&instance.class.index) {
-                    instance.class.index = *new_index;
-                }
-                for value in instance.fields.values_mut() {
-                    if let NewValue::HeapValue(heap_ref) = value {
-                        if let Some(new_index) = remapping.get(&heap_ref.index) {
-                            heap_ref.index = *new_index;
-                        }
-                    }
-                }
-            }
-            HeapValue::BoundMethod(method) => {
-                if let Some(new_index) = remapping.get(&method.instance.index) {
-                    method.instance.index = *new_index;
-                }
-                if let Some(new_index) = remapping.get(&method.closure.index) {
-                    method.closure.index = *new_index;
-                }
-            }
-            HeapValue::Closure(closure) => {
-                for upvalue in &closure.upvalues {
-                    if let Some(NewValue::HeapValue(mut heap_ref)) = *upvalue.closed.borrow_mut() {
-                        if let Some(new_index) = remapping.get(&heap_ref.index) {
-                            heap_ref.index = *new_index;
-                        }
-                    }
-                }
-            }
-            HeapValue::NativeFunction(_) => {
-                // native functions don't have any heap references
-            }
-        }
+    if DEBUG_TRACING {
+        println!("Marked {new_heap_size} out of {old_heap_size} entries and relocated {current_open_slot} entries");
     }
-
-    // TODO: need to remap all heap references at the roots as well (the sources used in mark_reachable_heap())
-
-    //println!("Marked {} out of {} entries", new_heap_size, old_heap_size);
 }
 
 fn mark_reachable_heap(state: &State) {
@@ -149,13 +103,6 @@ fn mark_reachable_heap(state: &State) {
             None
         }
     });
-    let open_upvalue_refs = state.open_upvalues.iter().filter_map(|v| {
-        if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
-            Some(loc)
-        } else {
-            None
-        }
-    });
     let call_stack_captured_refs = state.call_stack.iter().flat_map(|v| {
         v.closure.upvalues.iter().filter_map(|v| {
             if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
@@ -168,12 +115,86 @@ fn mark_reachable_heap(state: &State) {
 
     let all_refs = global_refs
         .chain(stack_refs)
-        .chain(open_upvalue_refs)
         .chain(call_stack_captured_refs);
 
     for loc in all_refs {
         mark_heap_entry(&state.value_heap, loc);
     }
+}
+
+fn remap_heap_value(value: &mut NewValue, remapping: &HashMap<usize, usize>) {
+    if let NewValue::HeapValue(heap_ref) = value {
+        if let Some(new_index) = remapping.get(&heap_ref.index) {
+            heap_ref.index = *new_index;
+        }
+    }
+}
+
+fn remap_upvalue(upvalue: &Upvalue, remapping: &HashMap<usize, usize>) {
+    if let Some(NewValue::HeapValue(mut heap_ref)) = *upvalue.closed.borrow_mut() {
+        if let Some(new_index) = remapping.get(&heap_ref.index) {
+            heap_ref.index = *new_index;
+        }
+    }
+}
+
+// remap any heap references held by this object
+fn remap_heap_object(value: &mut HeapValue, remapping: &HashMap<usize, usize>) {
+    match value {
+        HeapValue::Class(class) => {
+            for heap_ref in class.methods.values_mut() {
+                if let Some(new_index) = remapping.get(&heap_ref.index) {
+                    heap_ref.index = *new_index;
+                }
+            }
+        }
+        HeapValue::Instance(instance) => {
+            if let Some(new_index) = remapping.get(&instance.class.index) {
+                instance.class.index = *new_index;
+            }
+            for value in instance.fields.values_mut() {
+                if let NewValue::HeapValue(heap_ref) = value {
+                    if let Some(new_index) = remapping.get(&heap_ref.index) {
+                        heap_ref.index = *new_index;
+                    }
+                }
+            }
+        }
+        HeapValue::BoundMethod(method) => {
+            if let Some(new_index) = remapping.get(&method.instance.index) {
+                method.instance.index = *new_index;
+            }
+            if let Some(new_index) = remapping.get(&method.closure.index) {
+                method.closure.index = *new_index;
+            }
+        }
+        HeapValue::Closure(closure) => {
+            for upvalue in &closure.upvalues {
+                if let Some(NewValue::HeapValue(mut heap_ref)) = *upvalue.closed.borrow_mut() {
+                    if let Some(new_index) = remapping.get(&heap_ref.index) {
+                        heap_ref.index = *new_index;
+                    }
+                }
+            }
+        }
+        HeapValue::NativeFunction(_) => {
+            // native functions don't have any heap references
+        }
+    }
+}
+
+fn remap_heap_refs(state: &mut State, remapping: &HashMap<usize, usize>) {
+    for entry in &mut state.value_heap {
+        entry.marked.set(false);
+        remap_heap_object(&mut entry.value, remapping);
+    }
+
+    let remap_fn = |value| remap_heap_value(value, remapping);
+    state.globals.values_mut().for_each(remap_fn);
+    state.value_stack.iter_mut().for_each(remap_fn);
+
+    let remap_fn = |value: &Rc<Upvalue>| remap_upvalue(value, remapping);
+    state.call_stack.iter().flat_map(|frame| frame.closure.upvalues.iter()).for_each(remap_fn);
 }
 
 // marks the given entry and all entries referenced by it
