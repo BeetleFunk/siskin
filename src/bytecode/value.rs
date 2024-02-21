@@ -11,44 +11,44 @@ use super::code::{CompiledConstant, CompiledFunction};
 const TRACE_VALUE_DROP: bool = false;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum NewValue {
+pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
     String(String),
-    HeapValue(HeapRef),
+    HeapRef(HeapRef),
 }
 
-impl From<bool> for NewValue {
-    fn from(boolean: bool) -> NewValue {
-        NewValue::Bool(boolean)
+impl From<bool> for Value {
+    fn from(boolean: bool) -> Value {
+        Value::Bool(boolean)
     }
 }
 
-impl From<f64> for NewValue {
-    fn from(number: f64) -> NewValue {
-        NewValue::Number(number)
+impl From<f64> for Value {
+    fn from(number: f64) -> Value {
+        Value::Number(number)
     }
 }
 
-impl From<String> for NewValue {
-    fn from(string: String) -> NewValue {
-        NewValue::String(string)
+impl From<String> for Value {
+    fn from(string: String) -> Value {
+        Value::String(string)
     }
 }
 
-impl From<HeapRef> for NewValue {
-    fn from(location: HeapRef) -> NewValue {
-        NewValue::HeapValue(location)
+impl From<HeapRef> for Value {
+    fn from(location: HeapRef) -> Value {
+        Value::HeapRef(location)
     }
 }
 
-impl From<&CompiledConstant> for NewValue {
-    fn from(constant: &CompiledConstant) -> NewValue {
+impl From<&CompiledConstant> for Value {
+    fn from(constant: &CompiledConstant) -> Value {
         match constant {
-            CompiledConstant::Bool(value) => NewValue::Bool(*value),
-            CompiledConstant::Number(value) => NewValue::Number(*value),
-            CompiledConstant::String(value) => NewValue::String(value.clone()),
+            CompiledConstant::Bool(value) => Value::Bool(*value),
+            CompiledConstant::Number(value) => Value::Number(*value),
+            CompiledConstant::String(value) => Value::String(value.clone()),
             CompiledConstant::Function(_) => panic!(
                 "Compiled function must go through CLOSURE instruction to create runtime value."
             ),
@@ -131,7 +131,7 @@ pub struct Class {
 pub struct Instance {
     pub debug_class_name: String, // temporary class name copy for easier debugging
     pub class: HeapRef,
-    pub fields: HashMap<String, NewValue>,
+    pub fields: HashMap<String, Value>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -149,12 +149,12 @@ pub struct Closure {
 #[derive(Debug, PartialEq)]
 pub struct Upvalue {
     pub stack_index: usize, // the location in the value stack if this upvalue has not yet been closed
-    pub closed: RefCell<Option<NewValue>>, // the closed value once it has been moved to the heap
+    pub closed: RefCell<Option<Value>>, // the closed value once it has been moved to the heap
 }
 
 pub struct NativeFunction {
     pub arity: u8,
-    pub func: fn(heap: &[HeapEntry], arguments: &[NewValue]) -> BasicResult<NewValue>,
+    pub func: fn(heap: &[HeapEntry], arguments: &[Value]) -> BasicResult<Value>,
     pub name: String,
 }
 

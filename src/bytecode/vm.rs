@@ -13,7 +13,7 @@ use crate::error::{BasicError, BasicResult};
 use super::code::{self, CompiledConstant, CompiledFunction, OpCode};
 use super::compiler;
 use super::value::{
-    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, NativeFunction, NewValue,
+    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, NativeFunction, Value,
     Upvalue,
 };
 
@@ -26,9 +26,9 @@ static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 
 struct State {
     call_stack: Vec<CallFrame>,
-    value_stack: Vec<NewValue>,
+    value_stack: Vec<Value>,
     value_heap: Vec<HeapEntry>,
-    globals: HashMap<String, NewValue>,
+    globals: HashMap<String, Value>,
     open_upvalues: Vec<Rc<Upvalue>>,
 }
 
@@ -81,7 +81,7 @@ fn collect_garbage(state: &mut State) {
 
     state.value_heap.truncate(new_heap_size);
 
-    remap_heap_refs(state, &remapping);
+    remap_all_heap_refs(state, &remapping);
 
     if DEBUG_TRACING {
         println!("Marked {new_heap_size} out of {old_heap_size} entries and relocated {current_open_slot} entries");
@@ -90,14 +90,14 @@ fn collect_garbage(state: &mut State) {
 
 fn mark_reachable_heap(state: &State) {
     let global_refs = state.globals.values().filter_map(|v| {
-        if let NewValue::HeapValue(loc) = v {
+        if let Value::HeapRef(loc) = v {
             Some(*loc)
         } else {
             None
         }
     });
     let stack_refs = state.value_stack.iter().filter_map(|v| {
-        if let NewValue::HeapValue(loc) = v {
+        if let Value::HeapRef(loc) = v {
             Some(*loc)
         } else {
             None
@@ -105,7 +105,7 @@ fn mark_reachable_heap(state: &State) {
     });
     let call_stack_captured_refs = state.call_stack.iter().flat_map(|v| {
         v.closure.upvalues.iter().filter_map(|v| {
-            if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
+            if let Some(Value::HeapRef(loc)) = *v.closed.borrow() {
                 Some(loc)
             } else {
                 None
@@ -122,19 +122,21 @@ fn mark_reachable_heap(state: &State) {
     }
 }
 
-fn remap_heap_value(value: &mut NewValue, remapping: &HashMap<usize, usize>) {
-    if let NewValue::HeapValue(heap_ref) = value {
-        if let Some(new_index) = remapping.get(&heap_ref.index) {
-            heap_ref.index = *new_index;
-        }
+fn remap_value(value: &mut Value, remapping: &HashMap<usize, usize>) {
+    if let Value::HeapRef(heap_ref) = value {
+        remap_heap_ref(heap_ref, remapping);
     }
 }
 
 fn remap_upvalue(upvalue: &Upvalue, remapping: &HashMap<usize, usize>) {
-    if let Some(NewValue::HeapValue(mut heap_ref)) = *upvalue.closed.borrow_mut() {
-        if let Some(new_index) = remapping.get(&heap_ref.index) {
-            heap_ref.index = *new_index;
-        }
+    if let Some(Value::HeapRef(mut heap_ref)) = *upvalue.closed.borrow_mut() {
+        remap_heap_ref(&mut heap_ref, remapping);
+    }
+}
+
+fn remap_heap_ref(heap_ref: &mut HeapRef, remapping: &HashMap<usize, usize>) {
+    if let Some(new_index) = remapping.get(&heap_ref.index) {
+        heap_ref.index = *new_index;
     }
 }
 
@@ -143,38 +145,22 @@ fn remap_heap_object(value: &mut HeapValue, remapping: &HashMap<usize, usize>) {
     match value {
         HeapValue::Class(class) => {
             for heap_ref in class.methods.values_mut() {
-                if let Some(new_index) = remapping.get(&heap_ref.index) {
-                    heap_ref.index = *new_index;
-                }
+                remap_heap_ref(heap_ref, remapping);
             }
         }
         HeapValue::Instance(instance) => {
-            if let Some(new_index) = remapping.get(&instance.class.index) {
-                instance.class.index = *new_index;
-            }
+            remap_heap_ref(&mut instance.class, remapping);
             for value in instance.fields.values_mut() {
-                if let NewValue::HeapValue(heap_ref) = value {
-                    if let Some(new_index) = remapping.get(&heap_ref.index) {
-                        heap_ref.index = *new_index;
-                    }
-                }
+                remap_value(value, remapping)
             }
         }
         HeapValue::BoundMethod(method) => {
-            if let Some(new_index) = remapping.get(&method.instance.index) {
-                method.instance.index = *new_index;
-            }
-            if let Some(new_index) = remapping.get(&method.closure.index) {
-                method.closure.index = *new_index;
-            }
+            remap_heap_ref(&mut method.instance, remapping);
+            remap_heap_ref(&mut method.closure, remapping);
         }
         HeapValue::Closure(closure) => {
             for upvalue in &closure.upvalues {
-                if let Some(NewValue::HeapValue(mut heap_ref)) = *upvalue.closed.borrow_mut() {
-                    if let Some(new_index) = remapping.get(&heap_ref.index) {
-                        heap_ref.index = *new_index;
-                    }
-                }
+                remap_upvalue(upvalue, remapping)
             }
         }
         HeapValue::NativeFunction(_) => {
@@ -183,13 +169,13 @@ fn remap_heap_object(value: &mut HeapValue, remapping: &HashMap<usize, usize>) {
     }
 }
 
-fn remap_heap_refs(state: &mut State, remapping: &HashMap<usize, usize>) {
+fn remap_all_heap_refs(state: &mut State, remapping: &HashMap<usize, usize>) {
     for entry in &mut state.value_heap {
         entry.marked.set(false);
         remap_heap_object(&mut entry.value, remapping);
     }
 
-    let remap_fn = |value| remap_heap_value(value, remapping);
+    let remap_fn = |value| remap_value(value, remapping);
     state.globals.values_mut().for_each(remap_fn);
     state.value_stack.iter_mut().for_each(remap_fn);
 
@@ -218,7 +204,7 @@ fn mark_heap_entry(heap: &[HeapEntry], loc: HeapRef) {
                 .fields
                 .values()
                 .filter_map(|v| {
-                    if let NewValue::HeapValue(loc) = v {
+                    if let Value::HeapRef(loc) = v {
                         Some(loc)
                     } else {
                         None
@@ -235,7 +221,7 @@ fn mark_heap_entry(heap: &[HeapEntry], loc: HeapRef) {
                 .upvalues
                 .iter()
                 .filter_map(|v| {
-                    if let Some(NewValue::HeapValue(loc)) = *v.closed.borrow() {
+                    if let Some(Value::HeapRef(loc)) = *v.closed.borrow() {
                         Some(loc)
                     } else {
                         None
@@ -286,7 +272,7 @@ fn setup_standard_library(state: &mut State) {
     }
 }
 
-fn native_clock(_heap: &[HeapEntry], _args: &[NewValue]) -> BasicResult<NewValue> {
+fn native_clock(_heap: &[HeapEntry], _args: &[Value]) -> BasicResult<Value> {
     // make sure epoch is initialized first (lazy init)
     let epoch = *EPOCH;
     let duration = Instant::now() - epoch;
@@ -294,9 +280,9 @@ fn native_clock(_heap: &[HeapEntry], _args: &[NewValue]) -> BasicResult<NewValue
     Ok((duration.as_millis() as f64).into())
 }
 
-fn native_sqrt(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> {
-    if let NewValue::Number(value) = args[0] {
-        Ok(NewValue::from(value.sqrt()))
+fn native_sqrt(_heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
+    if let Value::Number(value) = args[0] {
+        Ok(Value::from(value.sqrt()))
     } else {
         Err(BasicError::new(
             "Expected number argument for sqrt function.",
@@ -304,12 +290,12 @@ fn native_sqrt(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> 
     }
 }
 
-fn native_to_string(heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> {
-    Ok(NewValue::from(value_to_string(heap, &args[0])))
+fn native_to_string(heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
+    Ok(Value::from(value_to_string(heap, &args[0])))
 }
 
-fn native_sleep(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue> {
-    if let NewValue::Number(value) = args[0] {
+fn native_sleep(_heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
+    if let Value::Number(value) = args[0] {
         if value < 0.0 {
             return Err(BasicError::new(
                 "Expected positive number argument for sleep function.",
@@ -317,7 +303,7 @@ fn native_sleep(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue>
         }
         let duration = Duration::from_millis(value as u64);
         thread::sleep(duration);
-        Ok(NewValue::Nil)
+        Ok(Value::Nil)
     } else {
         Err(BasicError::new(
             "Expected number argument for sleep function.",
@@ -325,8 +311,8 @@ fn native_sleep(_heap: &[HeapEntry], args: &[NewValue]) -> BasicResult<NewValue>
     }
 }
 
-fn native_heap_check(heap: &[HeapEntry], _args: &[NewValue]) -> BasicResult<NewValue> {
-    Ok(NewValue::Number(heap.len() as f64))
+fn native_heap_check(heap: &[HeapEntry], _args: &[Value]) -> BasicResult<Value> {
+    Ok(Value::Number(heap.len() as f64))
 }
 
 struct CallFrame {
@@ -391,12 +377,12 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Constant => {
-                let constant_value = NewValue::from(read_constant(state));
+                let constant_value = Value::from(read_constant(state));
                 state.value_stack.push(constant_value);
             }
             OpCode::Negate => {
-                if let NewValue::Number(value) = state.value_stack.pop().unwrap() {
-                    state.value_stack.push(NewValue::from(-value));
+                if let Value::Number(value) = state.value_stack.pop().unwrap() {
+                    state.value_stack.push(Value::from(-value));
                 } else {
                     return Err(build_error(
                         "Negation requires numeric operand",
@@ -405,8 +391,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Not => {
-                if let NewValue::Bool(value) = state.value_stack.pop().unwrap() {
-                    state.value_stack.push(NewValue::from(!value));
+                if let Value::Bool(value) = state.value_stack.pop().unwrap() {
+                    state.value_stack.push(Value::from(!value));
                 } else {
                     return Err(build_error(
                         "Boolean inversion requires boolean operand",
@@ -417,12 +403,12 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Equal => {
                 let b = state.value_stack.pop().unwrap();
                 let a = state.value_stack.pop().unwrap();
-                state.value_stack.push(NewValue::from(a == b));
+                state.value_stack.push(Value::from(a == b));
             }
             OpCode::Greater => {
                 let operands = pop_binary_operands(&mut state.value_stack);
-                if let (NewValue::Number(a), NewValue::Number(b)) = operands {
-                    state.value_stack.push(NewValue::from(a > b));
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(a > b));
                 } else {
                     return Err(build_error(
                         "Comparison requires numeric operands",
@@ -432,8 +418,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Less => {
                 let operands = pop_binary_operands(&mut state.value_stack);
-                if let (NewValue::Number(a), NewValue::Number(b)) = operands {
-                    state.value_stack.push(NewValue::from(a < b));
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(a < b));
                 } else {
                     return Err(build_error(
                         "Comparison requires numeric operands",
@@ -443,10 +429,10 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Add => {
                 let operands = pop_binary_operands(&mut state.value_stack);
-                if let (NewValue::Number(a), NewValue::Number(b)) = operands {
-                    state.value_stack.push(NewValue::from(a + b));
-                } else if let (NewValue::String(a), NewValue::String(b)) = operands {
-                    state.value_stack.push(NewValue::from(a + &b));
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(a + b));
+                } else if let (Value::String(a), Value::String(b)) = operands {
+                    state.value_stack.push(Value::from(a + &b));
                 } else {
                     return Err(build_error(
                         "Addition requires either numeric or string operands",
@@ -456,8 +442,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Subtract => {
                 let operands = pop_binary_operands(&mut state.value_stack);
-                if let (NewValue::Number(a), NewValue::Number(b)) = operands {
-                    state.value_stack.push(NewValue::from(a - b));
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(a - b));
                 } else {
                     return Err(build_error(
                         "Subtraction requires numeric operands",
@@ -467,8 +453,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Multiply => {
                 let operands = pop_binary_operands(&mut state.value_stack);
-                if let (NewValue::Number(a), NewValue::Number(b)) = operands {
-                    state.value_stack.push(NewValue::from(a * b));
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(a * b));
                 } else {
                     return Err(build_error(
                         "Multiplication requires numeric operands",
@@ -478,8 +464,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Divide => {
                 let operands = pop_binary_operands(&mut state.value_stack);
-                if let (NewValue::Number(a), NewValue::Number(b)) = operands {
-                    state.value_stack.push(NewValue::from(a / b));
+                if let (Value::Number(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(a / b));
                 } else {
                     return Err(build_error(
                         "Division requires numeric operands",
@@ -487,9 +473,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     ));
                 }
             }
-            OpCode::Nil => state.value_stack.push(NewValue::Nil),
-            OpCode::True => state.value_stack.push(NewValue::Bool(true)),
-            OpCode::False => state.value_stack.push(NewValue::Bool(false)),
+            OpCode::Nil => state.value_stack.push(Value::Nil),
+            OpCode::True => state.value_stack.push(Value::Bool(true)),
+            OpCode::False => state.value_stack.push(Value::Bool(false)),
             OpCode::Print => {
                 let printed = value_to_string(&state.value_heap, &state.value_stack.pop().unwrap());
                 writeln!(output, "{}", printed).expect("Output writer should succeed.");
@@ -544,7 +530,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::JumpIfFalse => {
                 let offset = read_short(state);
-                if let NewValue::Bool(condition_value) = state.value_stack.last().unwrap() {
+                if let Value::Bool(condition_value) = state.value_stack.last().unwrap() {
                     if !condition_value {
                         state.frame_mut().ip += offset as usize;
                     }
@@ -707,7 +693,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         let class = get_class(state, class);
                         if let Some(closure) = class.methods.get(&property_name) {
                             // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
-                            NewValue::HeapValue(*closure)
+                            Value::HeapRef(*closure)
                         } else {
                             return Err(build_error(
                                 &format!("Undefined property '{}'.", property_name),
@@ -771,7 +757,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 );
                 if let Some(closure_ref) = superclass.methods.get(&method_name) {
                     // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
-                    let callee = NewValue::HeapValue(*closure_ref);
+                    let callee = Value::HeapRef(*closure_ref);
                     call_value(state, callee, arg_count)?;
                 } else {
                     return Err(build_error(
@@ -825,18 +811,18 @@ fn read_function_constant(state: &mut State) -> Rc<CompiledFunction> {
     }
 }
 
-fn pop_binary_operands(stack: &mut Vec<NewValue>) -> (NewValue, NewValue) {
+fn pop_binary_operands(stack: &mut Vec<Value>) -> (Value, Value) {
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
     (a, b)
 }
 
-fn call_value(state: &mut State, callee: NewValue, arg_count: u8) -> BasicResult<()> {
+fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()> {
     if state.call_stack.len() >= FRAMES_MAX {
         return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
-    let heap_location = if let NewValue::HeapValue(heap_location) = callee {
+    let heap_location = if let Value::HeapRef(heap_location) = callee {
         heap_location
     } else {
         return Err(build_error(
@@ -868,7 +854,7 @@ fn call_value(state: &mut State, callee: NewValue, arg_count: u8) -> BasicResult
                 closure: closure.clone(),
             });
             // rewrite local slot zero with the value of the bound method instance, used when referencing 'this' in function body
-            state.value_stack[locals_base] = NewValue::HeapValue(method.instance);
+            state.value_stack[locals_base] = Value::HeapRef(method.instance);
         }
         HeapValue::Closure(closure) => {
             if closure.function.arity != arg_count {
@@ -975,7 +961,7 @@ fn capture_upvalue(state: &mut State, stack_index: usize) -> Rc<Upvalue> {
 }
 
 // returns true if matching upvalue was closed, false if not found
-fn close_upvalue(state: &mut State, stack_index: usize, value: NewValue) -> bool {
+fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
     // TODO: will the upvalue to close always be at the end of the list?
     let position_rev = state
         .open_upvalues
@@ -1003,7 +989,7 @@ fn close_upvalue(state: &mut State, stack_index: usize, value: NewValue) -> bool
 // remove all entries at and above stack_index_begin, and close any corresponding upvalues
 fn pop_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
     let end = state.value_stack.len();
-    let popped_values_rev: Vec<NewValue> = state
+    let popped_values_rev: Vec<Value> = state
         .value_stack
         .drain(stack_index_begin..end)
         .rev()
@@ -1037,19 +1023,19 @@ fn build_error(message: &str, line: u32) -> BasicError {
     BasicError::new(&format!("Execution error at line {line}: {message}"))
 }
 
-fn place_on_heap(state: &mut State, value: HeapValue) -> NewValue {
+fn place_on_heap(state: &mut State, value: HeapValue) -> Value {
     state.value_heap.push(HeapEntry {
         value,
         marked: Cell::new(false),
     });
-    NewValue::from(HeapRef {
+    Value::from(HeapRef {
         index: state.value_heap.len() - 1,
     })
 }
 
 fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapValue)> {
     let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
-    if let NewValue::HeapValue(location) = stack_entry {
+    if let Value::HeapRef(location) = stack_entry {
         Some((*location, &state.value_heap[location.index].value))
     } else {
         None
@@ -1058,7 +1044,7 @@ fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapV
 
 fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let top = state.value_stack.last().unwrap();
-    if let NewValue::HeapValue(location) = top {
+    if let Value::HeapRef(location) = top {
         Some((*location, &mut state.value_heap[location.index].value))
     } else {
         None
@@ -1067,7 +1053,7 @@ fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValu
 
 fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
     let popped = state.value_stack.pop().unwrap();
-    if let NewValue::HeapValue(location) = popped {
+    if let Value::HeapRef(location) = popped {
         Some((location, &state.value_heap[location.index].value))
     } else {
         None
@@ -1076,7 +1062,7 @@ fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
 
 fn stack_pop_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let popped = state.value_stack.pop().unwrap();
-    if let NewValue::HeapValue(location) = popped {
+    if let Value::HeapRef(location) = popped {
         Some((location, &mut state.value_heap[location.index].value))
     } else {
         None
@@ -1153,13 +1139,13 @@ fn get_class(state: &State, location: HeapRef) -> &Class {
     }
 }
 
-fn value_to_string(heap: &[HeapEntry], value: &NewValue) -> String {
+fn value_to_string(heap: &[HeapEntry], value: &Value) -> String {
     match value {
-        NewValue::Bool(value) => value.to_string(),
-        NewValue::Nil => "Nil".to_string(),
-        NewValue::Number(value) => value.to_string(),
-        NewValue::String(value) => value.clone(),
-        NewValue::HeapValue(location) => {
+        Value::Bool(value) => value.to_string(),
+        Value::Nil => "Nil".to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::HeapRef(location) => {
             let heap_entry = &heap[location.index];
             heap_entry.value.to_string()
         }
