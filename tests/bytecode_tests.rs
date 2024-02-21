@@ -105,11 +105,16 @@ fn bind_to_global() -> TestResult {
         {
             var a = a;
         }";
-
-    let result = run(code);
-    let error = result.unwrap_err();
+    let error = run(code).unwrap_err();
     assert!(error.description.contains("Undefined variable"));
+    Ok(())
+}
 
+#[test]
+fn set_undefined_global() -> TestResult {
+    let code = "a = 5;";
+    let error = run(code).unwrap_err();
+    assert!(error.description.contains("Undefined variable"));
     Ok(())
 }
 
@@ -780,6 +785,30 @@ fn type_init_invalid_return() -> TestResult {
     assert!(error
         .description
         .contains("Can't return a value from an initializer"));
+    Ok(())
+}
+
+#[test]
+fn bound_method_invocation() -> TestResult {
+    let code = "\
+        class Dynamite {
+            init() {
+                this.result = \"Boom!\";
+            }
+
+            boom() {
+                print this.result;
+            }
+        }
+        var stick = Dynamite();
+        var boundMethod = stick.boom;
+        boundMethod();";
+
+    let output = run(code)?;
+    assert_eq!(
+        "Boom!\n",
+        output
+    );
     Ok(())
 }
 
