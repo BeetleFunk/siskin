@@ -63,8 +63,8 @@ fn circular_references() -> TestResult {
 
         {
             var outerList = List();
-            var numLists = 30; //var numLists = 1000;
-            var innerListSize = 30; //var innerListSize = 1000;
+            var numLists = 16; //var numLists = 1000;
+            var innerListSize = 16; //var innerListSize = 1000;
             for (var i = 0; i < numLists; i = i + 1) {
                 var innerList = List();
                 for (var j = 0; j < innerListSize; j = j + 1) {
@@ -81,7 +81,12 @@ fn circular_references() -> TestResult {
         print \"heap size: \" + toString(getNumHeapEntries());";
 
     let output = run(code)?;
-    println!("{output}");
+    let expected = "\
+        Made a big list!\n\
+        heap size: 300\n\
+        List is now out of scope!\n\
+        heap size: 11\n";
+    assert_eq!(expected, output);
     Ok(())
 }
 
@@ -158,6 +163,14 @@ fn relocated_heap_references() -> TestResult {
         print \"Read global3.value: \" + toString(global3.value);";
     
     let output = run(code)?;
-    println!("{output}");
+    let expected = "\
+        Made a big list!\n\
+        heap size: 173\n\
+        List is now out of scope!\n\
+        heap size: 14\n\
+        Read global1.value: 1\n\
+        Read global2.value: 3\n\
+        Read global3.value: 5\n";
+    assert_eq!(expected, output);
     Ok(())
 }
