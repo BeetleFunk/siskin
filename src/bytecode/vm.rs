@@ -51,6 +51,22 @@ impl State {
         state
     }
 
+    fn get_heap_value(&self, loc: HeapRef) -> &HeapValue {
+        &self.value_heap[loc.0].value
+    }
+
+    fn get_heap_value_mut(&mut self, loc: HeapRef) -> &mut HeapValue {
+        &mut self.value_heap[loc.0].value
+    }
+
+    fn place_on_heap(&mut self, value: HeapValue) -> Value {
+        self.value_heap.push(HeapEntry {
+            value,
+            marked: Cell::new(false),
+        });
+        Value::from(HeapRef(self.value_heap.len() - 1))
+    }
+
     // the current call frame
     fn frame(&self) -> &CallFrame {
         self.call_stack.last().unwrap()
@@ -94,7 +110,7 @@ fn setup_standard_library(state: &mut State) {
     // add standard library native functions into the globals
     for func in library {
         let name = func.name.clone();
-        let heap_entry = place_on_heap(state, HeapValue::from(func));
+        let heap_entry = state.place_on_heap(HeapValue::from(func));
         state.globals.insert(name, heap_entry);
     }
 }
@@ -388,7 +404,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         upvalues.push(enclosing_upvalue.clone())
                     }
                 }
-                let value = place_on_heap(state, HeapValue::from(Closure { function, upvalues }));
+                let value = state.place_on_heap(HeapValue::from(Closure { function, upvalues }));
                 state.value_stack.push(value);
             }
             OpCode::GetUpvalue => {
@@ -425,13 +441,10 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Class => {
                 let name = read_string_constant(state);
-                let class = place_on_heap(
-                    state,
-                    HeapValue::from(Class {
-                        name,
-                        methods: HashMap::new(),
-                    }),
-                );
+                let class = state.place_on_heap(HeapValue::from(Class {
+                    name,
+                    methods: HashMap::new(),
+                }));
                 state.value_stack.push(class);
             }
             OpCode::GetProperty => {
@@ -449,7 +462,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                                 instance: location,
                                 closure: *closure,
                             });
-                            let bound_method = place_on_heap(state, bound_method);
+                            let bound_method = state.place_on_heap(bound_method);
                             state.value_stack.push(bound_method);
                         } else {
                             return Err(build_error(
@@ -536,8 +549,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
                 if let Some((_, superclass)) = stack_peek_class(state) {
                     let base_methods = superclass.methods.clone();
-                    if let HeapValue::Class(subclass) = &mut state.value_heap[subclass.index].value
-                    {
+                    if let HeapValue::Class(subclass) = state.get_heap_value_mut(subclass) {
                         subclass.methods.extend(base_methods)
                     } else {
                         panic!("Inherit instruction expects a class type value to be on top of the stack.");
@@ -566,7 +578,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     "GetSuper instruction expects an instance type value to be on the stack.",
                 );
                 let bound_method =
-                    place_on_heap(state, HeapValue::from(BoundMethod { instance, closure }));
+                    state.place_on_heap(HeapValue::from(BoundMethod { instance, closure }));
                 state.value_stack.push(bound_method);
             }
             OpCode::SuperInvoke => {
@@ -642,8 +654,8 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
-    let heap_location = if let Value::HeapRef(heap_location) = callee {
-        heap_location
+    let callee_heap_ref = if let Value::HeapRef(callee_heap_ref) = callee {
+        callee_heap_ref
     } else {
         return Err(build_error(
             "Can only call functions and classes.",
@@ -651,7 +663,8 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         ));
     };
 
-    let callee = &state.value_heap[heap_location.index].value;
+    // Can't use fn get_heap_value() here because the current implementation requires split borrow on State fields
+    let callee = &state.value_heap[callee_heap_ref.0].value;
 
     // this should point to the current location of the callee on the stack, regular arguments will begin in slot 1 relative to this base pointer
     let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
@@ -746,11 +759,11 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             }
             let instance = HeapValue::from(Instance {
                 debug_class_name: class.name.clone(),
-                class: heap_location,
+                class: callee_heap_ref,
                 fields: HashMap::new(),
             });
             // replace the class value (callee) on the stack with the newly created instance
-            state.value_stack[locals_base] = place_on_heap(state, instance);
+            state.value_stack[locals_base] = state.place_on_heap(instance);
         }
         _ => {
             return Err(build_error(
@@ -843,20 +856,10 @@ fn build_error(message: &str, line: u32) -> BasicError {
     BasicError::new(&format!("Execution error at line {line}: {message}"))
 }
 
-fn place_on_heap(state: &mut State, value: HeapValue) -> Value {
-    state.value_heap.push(HeapEntry {
-        value,
-        marked: Cell::new(false),
-    });
-    Value::from(HeapRef {
-        index: state.value_heap.len() - 1,
-    })
-}
-
 fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapValue)> {
     let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
     if let Value::HeapRef(location) = stack_entry {
-        Some((*location, &state.value_heap[location.index].value))
+        Some((*location, state.get_heap_value(*location)))
     } else {
         None
     }
@@ -865,7 +868,7 @@ fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapV
 fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let top = state.value_stack.last().unwrap();
     if let Value::HeapRef(location) = top {
-        Some((*location, &mut state.value_heap[location.index].value))
+        Some((*location, state.get_heap_value_mut(*location)))
     } else {
         None
     }
@@ -874,7 +877,7 @@ fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValu
 fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
     let popped = state.value_stack.pop().unwrap();
     if let Value::HeapRef(location) = popped {
-        Some((location, &state.value_heap[location.index].value))
+        Some((location, state.get_heap_value(location)))
     } else {
         None
     }
@@ -883,7 +886,7 @@ fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
 fn stack_pop_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let popped = state.value_stack.pop().unwrap();
     if let Value::HeapRef(location) = popped {
-        Some((location, &mut state.value_heap[location.index].value))
+        Some((location, state.get_heap_value_mut(location)))
     } else {
         None
     }
@@ -944,18 +947,18 @@ fn stack_peek_class_mut(state: &mut State) -> Option<(HeapRef, &mut Class)> {
 }
 
 fn get_closure(state: &State, location: HeapRef) -> &Rc<Closure> {
-    if let HeapValue::Closure(closure) = &state.value_heap[location.index].value {
+    if let HeapValue::Closure(closure) = state.get_heap_value(location) {
         closure
     } else {
-        panic!("Expected closure at heap index {}", location.index);
+        panic!("Expected closure at heap index {}", location);
     }
 }
 
 fn get_class(state: &State, location: HeapRef) -> &Class {
-    if let HeapValue::Class(class) = &state.value_heap[location.index].value {
+    if let HeapValue::Class(class) = state.get_heap_value(location) {
         class
     } else {
-        panic!("Expected class at heap index {}", location.index);
+        panic!("Expected class at heap index {}", location);
     }
 }
 
@@ -966,7 +969,7 @@ fn value_to_string(heap: &[HeapEntry], value: &Value) -> String {
         Value::Number(value) => value.to_string(),
         Value::String(value) => value.clone(),
         Value::HeapRef(location) => {
-            let heap_entry = &heap[location.index];
+            let heap_entry = &heap[location.0];
             heap_entry.value.to_string()
         }
     }

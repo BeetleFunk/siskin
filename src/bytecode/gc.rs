@@ -74,13 +74,13 @@ fn mark_reachable_heap(state: &State) {
 
 // marks the given entry and all entries referenced by it
 fn mark_heap_entry(heap: &[HeapEntry], loc: HeapRef) {
-    let already_marked = heap[loc.index].marked.replace(true);
+    let already_marked = heap[loc.0].marked.replace(true);
     // no need to mark children if this entry has already been processed
     if already_marked {
         return;
     }
 
-    match &heap[loc.index].value {
+    match &heap[loc.0].value {
         HeapValue::Class(class) => {
             class
                 .methods
@@ -184,7 +184,7 @@ fn remap_upvalue(upvalue: &Upvalue, remapping: &HashMap<usize, usize>) {
 }
 
 fn remap_heap_ref(heap_ref: &mut HeapRef, remapping: &HashMap<usize, usize>) {
-    if let Some(new_index) = remapping.get(&heap_ref.index) {
-        heap_ref.index = *new_index;
+    if let Some(new_index) = remapping.get(&heap_ref.0) {
+        heap_ref.0 = *new_index;
     }
 }

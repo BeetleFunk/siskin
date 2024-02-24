@@ -57,13 +57,17 @@ impl From<&CompiledConstant> for Value {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct HeapRef {
-    pub index: usize,
+pub struct HeapRef(pub usize);
+
+impl fmt::Display for HeapRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 pub struct HeapEntry {
     pub marked: Cell<bool>,
-    pub value: HeapValue
+    pub value: HeapValue,
 }
 
 #[derive(Debug, PartialEq)]
@@ -83,7 +87,7 @@ impl fmt::Display for HeapValue {
             Self::BoundMethod(v) => write!(
                 f,
                 "{} closure bound to instance at {}",
-                v.closure.index, v.instance.index
+                v.closure, v.instance
             ),
             Self::Closure(v) => write!(f, "{}", &v.function.name),
             Self::NativeFunction(v) => write!(f, "{}", &v.name),
@@ -217,7 +221,7 @@ impl Drop for BoundMethod {
         if TRACE_VALUE_DROP {
             println!(
                 "Dropping bound method - instance at {}, closure at {}",
-                self.instance.index, self.closure.index
+                self.instance, self.closure
             );
         }
     }
