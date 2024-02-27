@@ -131,6 +131,17 @@ pub struct Class {
     pub methods: HashMap<String, HeapRef>,
 }
 
+impl<'a> TryFrom<&'a HeapValue> for &'a Class {
+    type Error = ();
+    fn try_from(value: &HeapValue) -> Result<&Class, ()> {
+        if let HeapValue::Class(class) = value {
+            Ok(class)
+        } else {
+            Err(())
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Instance {
     pub debug_class_name: String, // temporary class name copy for easier debugging

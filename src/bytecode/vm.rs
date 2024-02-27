@@ -584,7 +584,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::SuperInvoke => {
                 let method_name = read_string_constant(state);
                 let arg_count = read_byte(state);
-                let (_, superclass) = stack_pop_class(state).expect(
+                let (_, superclass) = stack_pop::<&Class>(state).expect(
                     "SuperInvoke instruction expects a class type value to be on top of the stack.",
                 );
                 if let Some(closure_ref) = superclass.methods.get(&method_name) {
@@ -919,13 +919,18 @@ fn stack_pop_instance_mut(state: &mut State) -> Option<(HeapRef, &mut Instance)>
     }
 }
 
+// pops a HeapRef off the value stack and, if possible, converts the HeapValue enum ref to the provided inner ref type
+fn stack_pop<'a, T>(state: &'a mut State) -> Option<(HeapRef, T)>
+where
+    T: std::convert::TryFrom<&'a HeapValue>,
+{
+    let (location, heap_val) = stack_pop_reference(state)?;
+    let class: T = heap_val.try_into().ok()?;
+    Some((location, class))
+}
+
 fn stack_pop_class(state: &mut State) -> Option<(HeapRef, &Class)> {
-    let value = stack_pop_reference(state);
-    if let Some((location, HeapValue::Class(class))) = value {
-        Some((location, class))
-    } else {
-        None
-    }
+    stack_pop(state)
 }
 
 fn stack_peek_class(state: &mut State) -> Option<(HeapRef, &Class)> {

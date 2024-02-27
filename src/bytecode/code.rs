@@ -132,7 +132,7 @@ impl From<CompiledFunction> for CompiledConstant {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<CompiledConstant>,
@@ -141,11 +141,7 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new() -> Self {
-        Chunk {
-            code: Vec::new(),
-            constants: Vec::new(),
-            line_numbers: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn add_constant(&mut self, value: CompiledConstant) -> u8 {
