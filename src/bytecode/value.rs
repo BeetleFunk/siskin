@@ -56,6 +56,21 @@ impl From<&CompiledConstant> for Value {
     }
 }
 
+impl Value {
+    pub fn to_string(&self, heap: &[HeapEntry]) -> String {
+        match self {
+            Value::Bool(value) => value.to_string(),
+            Value::Nil => "Nil".to_string(),
+            Value::Number(value) => value.to_string(),
+            Value::String(value) => value.clone(),
+            Value::HeapRef(location) => {
+                let heap_entry = &heap[location.0];
+                heap_entry.value.to_string()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeapRef(pub usize);
 

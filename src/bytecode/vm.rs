@@ -3,26 +3,19 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
-use std::thread;
-use std::time::{Duration, Instant};
-
-use once_cell::sync::Lazy;
 
 use crate::error::{BasicError, BasicResult};
 
 use super::code::{self, CompiledConstant, CompiledFunction, OpCode};
 use super::gc;
+use super::stdlib;
 use super::value::{
-    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, NativeFunction, Upvalue,
-    Value,
+    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, Upvalue, Value,
 };
 
 const DEBUG_TRACING: bool = false;
 
 const FRAMES_MAX: usize = 256;
-
-// TODO: make this thread local and avoid requirement on sync?
-static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 
 pub struct State {
     pub call_stack: Vec<CallFrame>,
@@ -47,7 +40,7 @@ impl State {
             globals: HashMap::new(),
             open_upvalues: Vec::new(),
         };
-        setup_standard_library(&mut state);
+        setup_stdlib(&mut state);
         state
     }
 
@@ -78,84 +71,14 @@ impl State {
     }
 }
 
-fn setup_standard_library(state: &mut State) {
-    let library = [
-        NativeFunction {
-            arity: 0,
-            func: native_clock,
-            name: "clock".to_string(),
-        },
-        NativeFunction {
-            arity: 1,
-            func: native_sqrt,
-            name: "sqrt".to_string(),
-        },
-        NativeFunction {
-            arity: 1,
-            func: native_to_string,
-            name: "toString".to_string(),
-        },
-        NativeFunction {
-            arity: 1,
-            func: native_sleep,
-            name: "sleep".to_string(),
-        },
-        NativeFunction {
-            arity: 0,
-            func: native_heap_check,
-            name: "getNumHeapEntries".to_string(),
-        },
-    ];
-
-    // add standard library native functions into the globals
-    for func in library {
+// add standard library native functions into the globals
+fn setup_stdlib(state: &mut State) {
+    let stdlib = stdlib::standard_library();
+    for func in stdlib {
         let name = func.name.clone();
         let heap_entry = state.place_on_heap(HeapValue::from(func));
         state.globals.insert(name, heap_entry);
     }
-}
-
-fn native_clock(_heap: &[HeapEntry], _args: &[Value]) -> BasicResult<Value> {
-    // make sure epoch is initialized first (lazy init)
-    let epoch = *EPOCH;
-    let duration = Instant::now() - epoch;
-    // lossy conversion to f64 here, shouldn't be an issue for a while though
-    Ok((duration.as_millis() as f64).into())
-}
-
-fn native_sqrt(_heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
-    if let Value::Number(value) = args[0] {
-        Ok(Value::from(value.sqrt()))
-    } else {
-        Err(BasicError::new(
-            "Expected number argument for sqrt function.",
-        ))
-    }
-}
-
-fn native_to_string(heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
-    Ok(Value::from(value_to_string(heap, &args[0])))
-}
-
-fn native_sleep(_heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
-    if let Value::Number(value) = args[0] {
-        if value < 0.0 {
-            return Err(BasicError::new(
-                "Expected positive number argument for sleep function.",
-            ));
-        }
-        let duration = Duration::from_millis(value as u64);
-        thread::sleep(duration);
-        Ok(Value::Nil)
-    } else {
-        Err(BasicError::new(
-            "Expected number argument for sleep function.",
-        ))
-    }
-}
-
-fn native_heap_check(heap: &[HeapEntry], _args: &[Value]) -> BasicResult<Value> {
-    Ok(Value::Number(heap.len() as f64))
 }
 
 pub fn interpret(compiled: CompiledFunction, output: &mut dyn Write) -> BasicResult<()> {
@@ -313,7 +236,11 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::True => state.value_stack.push(Value::Bool(true)),
             OpCode::False => state.value_stack.push(Value::Bool(false)),
             OpCode::Print => {
-                let printed = value_to_string(&state.value_heap, &state.value_stack.pop().unwrap());
+                let printed = state
+                    .value_stack
+                    .pop()
+                    .unwrap()
+                    .to_string(&state.value_heap);
                 writeln!(output, "{}", printed).expect("Output writer should succeed.");
             }
             OpCode::Pop => {
@@ -806,7 +733,7 @@ fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
         let upvalue = state.open_upvalues.remove(position);
         if DEBUG_TRACING {
             let other_refs = Rc::strong_count(&upvalue) - 1;
-            let value_as_string = value_to_string(&state.value_heap, &value);
+            let value_as_string = value.to_string(&state.value_heap);
             println!(
                 "Closing upvalue ({}) for stack slot {} with {} remaining references.",
                 value_as_string, upvalue.stack_index, other_refs
@@ -837,7 +764,7 @@ fn pop_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
 fn print_stack(state: &State) {
     print!("          ");
     for entry in &state.value_stack {
-        print!("[ {} ]", value_to_string(&state.value_heap, entry));
+        print!("[ {} ]", entry.to_string(&state.value_heap));
     }
     println!();
 }
@@ -963,19 +890,6 @@ fn get_class(state: &State, location: HeapRef) -> &Class {
     if let HeapValue::Class(class) = state.get_heap_value(location) {
         class
     } else {
-        panic!("Expected class at heap index {}", location);
-    }
-}
-
-fn value_to_string(heap: &[HeapEntry], value: &Value) -> String {
-    match value {
-        Value::Bool(value) => value.to_string(),
-        Value::Nil => "Nil".to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::String(value) => value.clone(),
-        Value::HeapRef(location) => {
-            let heap_entry = &heap[location.0];
-            heap_entry.value.to_string()
-        }
+        panic!("Expected class at heap index {}", location.0);
     }
 }
