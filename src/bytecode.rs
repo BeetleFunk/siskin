@@ -1,6 +1,7 @@
 mod code;
 mod compiler;
 mod gc;
+mod stdlib;
 mod value;
 mod vm;
 
