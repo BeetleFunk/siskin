@@ -164,6 +164,17 @@ pub struct Instance {
     pub fields: HashMap<String, Value>,
 }
 
+impl<'a> TryFrom<&'a HeapValue> for &'a Instance {
+    type Error = ();
+    fn try_from(value: &HeapValue) -> Result<&Instance, ()> {
+        if let HeapValue::Instance(instance) = value {
+            Ok(instance)
+        } else {
+            Err(())
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct BoundMethod {
     pub instance: HeapRef,
@@ -174,6 +185,17 @@ pub struct BoundMethod {
 pub struct Closure {
     pub function: Rc<CompiledFunction>,
     pub upvalues: Vec<Rc<Upvalue>>,
+}
+
+impl<'a> TryFrom<&'a HeapValue> for &'a Closure {
+    type Error = ();
+    fn try_from(value: &HeapValue) -> Result<&Closure, ()> {
+        if let HeapValue::Closure(closure) = value {
+            Ok(closure)
+        } else {
+            Err(())
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

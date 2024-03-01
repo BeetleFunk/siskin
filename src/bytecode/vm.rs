@@ -27,7 +27,7 @@ pub struct State {
 
 pub struct CallFrame {
     pub ip: usize,
-    pub locals_base: usize, // base index for function locals within the VM locals stack
+    pub locals_base: usize, // base index for function locals within the VM value_stack
     pub closure: Rc<Closure>,
 }
 
@@ -424,15 +424,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Method => {
                 let name = read_string_constant(state);
-                if let Some((method, _)) = stack_pop_closure(state) {
-                    if let Some((_, class)) = stack_peek_class_mut(state) {
-                        class.methods.insert(name, method);
-                    } else {
-                        panic!("The target class must be on the value stack for method creation.");
-                    }
-                } else {
-                    panic!("Method instruction expects a closure type value to be on top of the stack.");
-                };
+                let (closure_ref, _) = stack_pop::<&Closure>(state).expect("Method instruction expects a closure type value to be on top of the stack.");
+                let (_, class) = stack_peek_class_mut(state).expect("The target class must be on the value stack for method creation.");
+                class.methods.insert(name, closure_ref);
             }
             OpCode::Invoke => {
                 let property_name = read_string_constant(state);
@@ -470,27 +464,24 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Inherit => {
+                // TODO: could do peek with offset below and then do this pop afterward to avoid the mutable borrow issue here
                 let (subclass, _) = stack_pop_reference(state).expect(
                     "Inherit instruction expects a class type value to be on top of the stack.",
                 );
                 // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
-                if let Some((_, superclass)) = stack_peek_class(state) {
-                    let base_methods = superclass.methods.clone();
-                    if let HeapValue::Class(subclass) = state.get_heap_value_mut(subclass) {
-                        subclass.methods.extend(base_methods)
-                    } else {
-                        panic!("Inherit instruction expects a class type value to be on top of the stack.");
-                    }
+                let (_, superclass) = stack_peek::<&Class>(state).ok_or_else(|| build_error(
+                    "Superclass must be a class.",
+                    last_line_number(state)))?;
+                let base_methods = superclass.methods.clone();
+                if let HeapValue::Class(subclass) = state.get_heap_value_mut(subclass) {
+                    subclass.methods.extend(base_methods);
                 } else {
-                    return Err(build_error(
-                        "Superclass must be a class.",
-                        last_line_number(state),
-                    ));
+                    panic!("Inherit instruction expects a class type value to be on top of the stack.");
                 }
             }
             OpCode::GetSuper => {
                 let method_name = read_string_constant(state);
-                let (_, superclass) = stack_pop_class(state).expect(
+                let (_, superclass) = stack_pop::<&Class>(state).expect(
                     "GetSuper instruction expects a class type value to be on top of the stack.",
                 );
                 let closure = if let Some(closure) = superclass.methods.get(&method_name) {
@@ -501,7 +492,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         last_line_number(state),
                     ));
                 };
-                let (instance, _) = stack_pop_instance(state).expect(
+                let (instance, _) = stack_pop::<&Instance>(state).expect(
                     "GetSuper instruction expects an instance type value to be on the stack.",
                 );
                 let bound_method =
@@ -819,15 +810,6 @@ fn stack_pop_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue
     }
 }
 
-fn stack_pop_closure(state: &mut State) -> Option<(HeapRef, &Closure)> {
-    let value = stack_pop_reference(state);
-    if let Some((location, HeapValue::Closure(closure))) = value {
-        Some((location, closure))
-    } else {
-        None
-    }
-}
-
 fn stack_pop_instance(state: &mut State) -> Option<(HeapRef, &Instance)> {
     let value = stack_pop_reference(state);
     if let Some((location, HeapValue::Instance(instance))) = value {
@@ -856,17 +838,13 @@ where
     Some((location, class))
 }
 
-fn stack_pop_class(state: &mut State) -> Option<(HeapRef, &Class)> {
-    stack_pop(state)
-}
-
-fn stack_peek_class(state: &mut State) -> Option<(HeapRef, &Class)> {
-    let value = stack_peek_reference(state, 0);
-    if let Some((location, HeapValue::Class(class))) = value {
-        Some((location, class))
-    } else {
-        None
-    }
+fn stack_peek<'a, T>(state: &'a State) -> Option<(HeapRef, T)>
+where
+    T: std::convert::TryFrom<&'a HeapValue>,
+{
+    let (location, heap_val) = stack_peek_reference(state, 0)?;
+    let class: T = heap_val.try_into().ok()?;
+    Some((location, class))
 }
 
 fn stack_peek_class_mut(state: &mut State) -> Option<(HeapRef, &mut Class)> {

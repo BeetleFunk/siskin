@@ -865,6 +865,17 @@ fn basic_inheritance() -> TestResult {
 }
 
 #[test]
+fn superclass_type_error() -> TestResult {
+    let code = "\
+        var NotAClass = 5;
+        class Child < NotAClass {}
+        var object = Child();";
+    let error = run(code).unwrap_err();
+    assert!(error.description.contains("Superclass must be a class."));
+    Ok(())
+}
+
+#[test]
 fn accessing_super_method() -> TestResult {
     let code = "\
         class Parent {
