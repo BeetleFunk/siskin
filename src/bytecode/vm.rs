@@ -44,6 +44,29 @@ impl State {
         state
     }
 
+    fn stack_pop(&mut self) -> Value {
+        self.value_stack.pop().unwrap()
+    }
+
+    fn stack_peek(&self) -> &Value {
+        self.value_stack.last().unwrap()
+    }
+
+    fn stack_peek_mut(&mut self) -> &mut Value {
+        self.value_stack.last_mut().unwrap()
+    }
+
+    // offset from the end (stack top)
+    fn stack_offset(&self, offset: usize) -> &Value {
+        &self.value_stack[self.value_stack.len() - offset - 1]
+    }
+
+    // offset from the end (stack top)
+    fn stack_offset_mut(&mut self, offset: usize) -> &mut Value {
+        let index = self.value_stack.len() - offset - 1;
+        &mut self.value_stack[index]
+    }
+
     fn get_heap_value(&self, loc: HeapRef) -> &HeapValue {
         &self.value_heap[loc.0].value
     }
@@ -123,7 +146,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
         let opcode: OpCode = read_byte(state).into();
         match opcode {
             OpCode::Return => {
-                let result = state.value_stack.pop().unwrap();
+                let result = state.stack_pop();
                 let previous_frame = state.call_stack.pop().unwrap();
                 if state.call_stack.is_empty() {
                     // hit the end of the root function (script toplevel)
@@ -140,7 +163,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 state.value_stack.push(constant_value);
             }
             OpCode::Negate => {
-                if let Value::Number(value) = state.value_stack.pop().unwrap() {
+                if let Value::Number(value) = state.stack_pop() {
                     state.value_stack.push(Value::from(-value));
                 } else {
                     return Err(build_error(
@@ -150,7 +173,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Not => {
-                if let Value::Bool(value) = state.value_stack.pop().unwrap() {
+                if let Value::Bool(value) = state.stack_pop() {
                     state.value_stack.push(Value::from(!value));
                 } else {
                     return Err(build_error(
@@ -160,8 +183,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Equal => {
-                let b = state.value_stack.pop().unwrap();
-                let a = state.value_stack.pop().unwrap();
+                let b = state.stack_pop();
+                let a = state.stack_pop();
                 state.value_stack.push(Value::from(a == b));
             }
             OpCode::Greater => {
@@ -248,7 +271,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::DefineGlobal => {
                 let name = read_string_constant(state);
-                let value = state.value_stack.pop().unwrap();
+                let value = state.stack_pop();
                 state.globals.insert(name, value);
             }
             OpCode::GetGlobal => {
@@ -264,10 +287,12 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::SetGlobal => {
                 let name = read_string_constant(state);
+                // avoid popping the value off the stack here, assignment result should be propagated
+                let value = state.stack_peek().clone();
+                // get and modify the entry if it exists, return an error otherwise
                 let entry = state.globals.entry(name);
                 if let std::collections::hash_map::Entry::Occupied(mut entry) = entry {
-                    // avoid popping the value off the stack here, assignment result should be propagated
-                    entry.insert(state.value_stack.last().unwrap().clone());
+                    entry.insert(value);
                 } else {
                     return Err(build_error(
                         &format!("Undefined variable {}.", entry.key()),
@@ -285,7 +310,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::SetLocal => {
                 let slot = read_byte(state);
                 let local_index = state.frame().locals_base + (slot as usize);
-                state.value_stack[local_index] = state.value_stack.last().unwrap().clone();
+                state.value_stack[local_index] = state.stack_peek().clone();
             }
             OpCode::Jump => {
                 let offset = read_short(state);
@@ -293,7 +318,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::JumpIfFalse => {
                 let offset = read_short(state);
-                if let Value::Bool(condition_value) = state.value_stack.last().unwrap() {
+                if let Value::Bool(condition_value) = state.stack_peek() {
                     if !condition_value {
                         state.frame_mut().ip += offset as usize;
                     }
@@ -310,9 +335,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Call => {
                 let arg_count = read_byte(state);
-                // cloning values should be cheap (heap entries are just references)
-                let callee =
-                    state.value_stack[state.value_stack.len() - 1 - (arg_count as usize)].clone();
+                // cloning a callable value is cheap (heap entries are indexed by a single usize)
+                let callee = state.stack_offset(arg_count as usize).clone();
                 call_value(state, callee, arg_count)?;
             }
             OpCode::Closure => {
@@ -346,7 +370,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 state.value_stack.push(cloned_val);
             }
             OpCode::SetUpvalue => {
-                let new_value = state.value_stack.last().unwrap().clone();
+                let new_value = state.stack_peek().clone();
                 let upvalue_slot = read_byte(state);
                 let upvalue = &state.frame().closure.upvalues[upvalue_slot as usize];
                 // determine whether the upvalue is closed (RefCell on the heap) or still open (index on the stack)
@@ -359,7 +383,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::CloseUpvalue => {
                 let stack_index = state.value_stack.len() - 1;
-                let value = state.value_stack.pop().unwrap();
+                let value = state.stack_pop();
                 let upvalue_closed = close_upvalue(state, stack_index, value);
                 // for sanity checking and troubleshooting
                 if !upvalue_closed {
@@ -408,7 +432,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::SetProperty => {
                 let property_name = read_string_constant(state);
                 // the value to set will be at the top of the stack and the instance will be the next entry after that
-                let property_value = state.value_stack.pop().unwrap();
+                let property_value = state.stack_pop();
                 if let Some((_, instance)) = stack_pop_instance_mut(state) {
                     instance
                         .fields
@@ -468,15 +492,15 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Inherit => {
-                let subclass = state.value_stack.pop().unwrap();
+                let subclass = state.stack_pop();
                 // leave the superclass on the stack, this local slot is needed for any references to "super"
-                let superclass = try_load_class(state, state.value_stack.last().unwrap())
-                    .ok_or_else(|| {
-                        build_error("Superclass must be a class.", last_line_number(state))
-                    })?;
+                let superclass = try_load_class(state, state.stack_peek()).ok_or_else(|| {
+                    build_error("Superclass must be a class.", last_line_number(state))
+                })?;
                 let base_methods = superclass.methods.clone();
-                let subclass = try_load_class_mut(state, &subclass)
-                    .expect("Inherit instruction expects a class type value to be on top of the stack.");
+                let subclass = try_load_class_mut(state, &subclass).expect(
+                    "Inherit instruction expects a class type value to be on top of the stack.",
+                );
                 subclass.methods.extend(base_methods);
             }
             OpCode::GetSuper => {
@@ -573,17 +597,13 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
-    let callee_heap_ref = if let Value::HeapRef(callee_heap_ref) = callee {
-        callee_heap_ref
-    } else {
-        return Err(build_error(
-            "Can only call functions and classes.",
-            last_line_number(state),
-        ));
-    };
+    let callee_ref = *callee.as_heap_ref().ok_or_else(|| build_error(
+        "Can only call functions and classes.",
+        last_line_number(state),
+    ))?;
 
     // Can't use fn get_heap_value() here because the current implementation requires split borrow on State fields
-    let callee = &state.value_heap[callee_heap_ref.0].value;
+    let callee = &state.value_heap[callee_ref.0].value;
 
     // this should point to the current location of the callee on the stack, regular arguments will begin in slot 1 relative to this base pointer
     let locals_base = state.value_stack.len() - (arg_count as usize) - 1;
@@ -678,7 +698,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             }
             let instance = HeapValue::from(Instance {
                 debug_class_name: class.name.clone(),
-                class: callee_heap_ref,
+                class: callee_ref,
                 fields: HashMap::new(),
             });
             // replace the class value (callee) on the stack with the newly created instance
@@ -775,21 +795,8 @@ fn build_error(message: &str, line: u32) -> BasicError {
     BasicError::new(&format!("Execution error at line {line}: {message}"))
 }
 
-fn peek_ref_offset(state: &State, offset: usize) -> Option<HeapRef> {
-    let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
-    if let Value::HeapRef(location) = stack_entry {
-        Some(*location)
-    } else {
-        None
-    }
-}
-
-fn peek_ref(state: &State) -> Option<HeapRef> {
-    peek_ref_offset(state, 0)
-}
-
 fn pop_ref(state: &mut State) -> Option<HeapRef> {
-    let popped = state.value_stack.pop().unwrap();
+    let popped = state.stack_pop();
     if let Value::HeapRef(location) = popped {
         Some(location)
     } else {
@@ -836,7 +843,7 @@ fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapV
 }
 
 fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
-    let top = state.value_stack.last().unwrap();
+    let top = state.stack_peek();
     if let Value::HeapRef(location) = top {
         Some((*location, state.get_heap_value_mut(*location)))
     } else {
@@ -845,7 +852,7 @@ fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValu
 }
 
 fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
-    let popped = state.value_stack.pop().unwrap();
+    let popped = state.stack_pop();
     if let Value::HeapRef(location) = popped {
         Some((location, state.get_heap_value(location)))
     } else {
@@ -854,7 +861,7 @@ fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
 }
 
 fn stack_pop_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
-    let popped = state.value_stack.pop().unwrap();
+    let popped = state.stack_pop();
     if let Value::HeapRef(location) = popped {
         Some((location, state.get_heap_value_mut(location)))
     } else {
@@ -886,15 +893,6 @@ where
     T: std::convert::TryFrom<&'a HeapValue>,
 {
     let (location, heap_val) = stack_pop_reference(state)?;
-    let value: T = heap_val.try_into().ok()?;
-    Some((location, value))
-}
-
-fn stack_peek<'a, T>(state: &'a State) -> Option<(HeapRef, T)>
-where
-    T: std::convert::TryFrom<&'a HeapValue>,
-{
-    let (location, heap_val) = stack_peek_reference(state, 0)?;
     let value: T = heap_val.try_into().ok()?;
     Some((location, value))
 }
