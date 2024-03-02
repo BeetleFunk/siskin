@@ -424,9 +424,13 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Method => {
                 let name = read_string_constant(state);
-                let (closure_ref, _) = stack_pop::<&Closure>(state).expect("Method instruction expects a closure type value to be on top of the stack.");
-                let (_, class) = stack_peek_class_mut(state).expect("The target class must be on the value stack for method creation.");
-                class.methods.insert(name, closure_ref);
+                let closure_ref = pop_ref(state);
+                load_ref_type::<&Closure>(state, closure_ref).expect(
+                    "Method instruction expects a closure type value to be on top of the stack.",
+                );
+                let (_, class) = stack_peek_class_mut(state)
+                    .expect("The target class must be on the value stack for method creation.");
+                class.methods.insert(name, closure_ref.unwrap());
             }
             OpCode::Invoke => {
                 let property_name = read_string_constant(state);
@@ -464,19 +468,21 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Inherit => {
-                // TODO: could do peek with offset below and then do this pop afterward to avoid the mutable borrow issue here
-                let (subclass, _) = stack_pop_reference(state).expect(
+                let subclass = pop_ref(state).expect(
                     "Inherit instruction expects a class type value to be on top of the stack.",
                 );
                 // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
-                let (_, superclass) = stack_peek::<&Class>(state).ok_or_else(|| build_error(
-                    "Superclass must be a class.",
-                    last_line_number(state)))?;
+                let superclass = peek_ref(state);
+                let superclass = load_ref_type::<&Class>(state, superclass).ok_or_else(|| {
+                    build_error("Superclass must be a class.", last_line_number(state))
+                })?;
                 let base_methods = superclass.methods.clone();
                 if let HeapValue::Class(subclass) = state.get_heap_value_mut(subclass) {
                     subclass.methods.extend(base_methods);
                 } else {
-                    panic!("Inherit instruction expects a class type value to be on top of the stack.");
+                    panic!(
+                        "Inherit instruction expects a class type value to be on top of the stack."
+                    );
                 }
             }
             OpCode::GetSuper => {
@@ -774,6 +780,47 @@ fn build_error(message: &str, line: u32) -> BasicError {
     BasicError::new(&format!("Execution error at line {line}: {message}"))
 }
 
+fn peek_ref_offset(state: &State, offset: usize) -> Option<HeapRef> {
+    let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
+    if let Value::HeapRef(location) = stack_entry {
+        Some(*location)
+    } else {
+        None
+    }
+}
+
+fn peek_ref(state: &State) -> Option<HeapRef> {
+    peek_ref_offset(state, 0)
+}
+
+fn pop_ref(state: &mut State) -> Option<HeapRef> {
+    let popped = state.value_stack.pop().unwrap();
+    if let Value::HeapRef(location) = popped {
+        Some(location)
+    } else {
+        None
+    }
+}
+
+fn load_ref_type<'a, T>(state: &'a State, location: Option<HeapRef>) -> Option<T>
+where
+    T: std::convert::TryFrom<&'a HeapValue>,
+{
+    let heap_val = state.get_heap_value(location?);
+    Some(heap_val.try_into().ok()?)
+}
+
+// TODO: how to handle this?
+// fn load_ref_type_mut<'a, T>(state: &'a mut State, location: HeapRef) -> Option<T>
+// where
+//     T: std::convert::TryFrom<&'a HeapValue>,
+// {
+//     let heap_val = state.get_heap_value_mut(location);
+//     Some(heap_val.try_into().ok()?)
+// }
+
+// *** Old access pattern below
+
 fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapValue)> {
     let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
     if let Value::HeapRef(location) = stack_entry {
@@ -834,8 +881,8 @@ where
     T: std::convert::TryFrom<&'a HeapValue>,
 {
     let (location, heap_val) = stack_pop_reference(state)?;
-    let class: T = heap_val.try_into().ok()?;
-    Some((location, class))
+    let value: T = heap_val.try_into().ok()?;
+    Some((location, value))
 }
 
 fn stack_peek<'a, T>(state: &'a State) -> Option<(HeapRef, T)>
@@ -843,8 +890,8 @@ where
     T: std::convert::TryFrom<&'a HeapValue>,
 {
     let (location, heap_val) = stack_peek_reference(state, 0)?;
-    let class: T = heap_val.try_into().ok()?;
-    Some((location, class))
+    let value: T = heap_val.try_into().ok()?;
+    Some((location, value))
 }
 
 fn stack_peek_class_mut(state: &mut State) -> Option<(HeapRef, &mut Class)> {
