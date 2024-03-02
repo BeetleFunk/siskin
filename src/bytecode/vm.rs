@@ -130,7 +130,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     break;
                 } else {
                     // pop all locals left by the previous frame as well as the callee itself
-                    pop_stack_and_close_upvalues(state, previous_frame.locals_base);
+                    drain_stack_and_close_upvalues(state, previous_frame.locals_base);
                     // leave the function result on top of the stack
                     state.value_stack.push(result);
                 }
@@ -468,22 +468,16 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 }
             }
             OpCode::Inherit => {
-                let subclass = pop_ref(state).expect(
-                    "Inherit instruction expects a class type value to be on top of the stack.",
-                );
-                // leave the superclass on the stack, the compiler uses this local slot for any references to "super"
-                let superclass = peek_ref(state);
-                let superclass = load_ref_type::<&Class>(state, superclass).ok_or_else(|| {
-                    build_error("Superclass must be a class.", last_line_number(state))
-                })?;
+                let subclass = state.value_stack.pop().unwrap();
+                // leave the superclass on the stack, this local slot is needed for any references to "super"
+                let superclass = try_load_class(state, state.value_stack.last().unwrap())
+                    .ok_or_else(|| {
+                        build_error("Superclass must be a class.", last_line_number(state))
+                    })?;
                 let base_methods = superclass.methods.clone();
-                if let HeapValue::Class(subclass) = state.get_heap_value_mut(subclass) {
-                    subclass.methods.extend(base_methods);
-                } else {
-                    panic!(
-                        "Inherit instruction expects a class type value to be on top of the stack."
-                    );
-                }
+                let subclass = try_load_class_mut(state, &subclass)
+                    .expect("Inherit instruction expects a class type value to be on top of the stack.");
+                subclass.methods.extend(base_methods);
             }
             OpCode::GetSuper => {
                 let method_name = read_string_constant(state);
@@ -512,7 +506,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     "SuperInvoke instruction expects a class type value to be on top of the stack.",
                 );
                 if let Some(closure_ref) = superclass.methods.get(&method_name) {
-                    // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
+                    // it's possible to call the method like a closure in this case because
+                    // the receiver instance is already in place on the stack, no need to create a method binding
                     let callee = Value::HeapRef(*closure_ref);
                     call_value(state, callee, arg_count)?;
                 } else {
@@ -646,7 +641,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             // pop arguments and make sure to pop the native function callable itself which is the entry before the first argument
             state
                 .value_stack
-                .drain((locals_base)..state.value_stack.len());
+                .drain(locals_base..state.value_stack.len());
 
             if let Err(e) = result {
                 return Err(build_error(
@@ -744,7 +739,7 @@ fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
 }
 
 // remove all entries at and above stack_index_begin, and close any corresponding upvalues
-fn pop_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
+fn drain_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
     let end = state.value_stack.len();
     let popped_values_rev: Vec<Value> = state
         .value_stack
@@ -802,12 +797,22 @@ fn pop_ref(state: &mut State) -> Option<HeapRef> {
     }
 }
 
+fn try_load_class<'a>(state: &'a State, heap_ref: &'_ Value) -> Option<&'a Class> {
+    let heap_val = state.get_heap_value(*heap_ref.as_heap_ref()?);
+    heap_val.as_class()
+}
+
+fn try_load_class_mut<'a>(state: &'a mut State, heap_ref: &'_ Value) -> Option<&'a mut Class> {
+    let heap_val = state.get_heap_value_mut(*heap_ref.as_heap_ref()?);
+    heap_val.as_class_mut()
+}
+
 fn load_ref_type<'a, T>(state: &'a State, location: Option<HeapRef>) -> Option<T>
 where
     T: std::convert::TryFrom<&'a HeapValue>,
 {
     let heap_val = state.get_heap_value(location?);
-    Some(heap_val.try_into().ok()?)
+    heap_val.try_into().ok()
 }
 
 // TODO: how to handle this?
