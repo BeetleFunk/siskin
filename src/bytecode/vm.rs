@@ -448,13 +448,13 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::Method => {
                 let name = read_string_constant(state);
-                let closure_ref = pop_ref(state);
-                load_ref_type::<&Closure>(state, closure_ref).expect(
+                let closure = state.stack_pop();
+                let (_, closure_ref) = try_load_closure(state, &closure).expect(
                     "Method instruction expects a closure type value to be on top of the stack.",
                 );
                 let (_, class) = stack_peek_class_mut(state)
                     .expect("The target class must be on the value stack for method creation.");
-                class.methods.insert(name, closure_ref.unwrap());
+                class.methods.insert(name, closure_ref);
             }
             OpCode::Invoke => {
                 let property_name = read_string_constant(state);
@@ -494,29 +494,30 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Inherit => {
                 let subclass = state.stack_pop();
                 // leave the superclass on the stack, this local slot is needed for any references to "super"
-                let superclass = try_load_class(state, state.stack_peek()).ok_or_else(|| {
-                    build_error("Superclass must be a class.", last_line_number(state))
-                })?;
+                let (superclass, _) =
+                    try_load_class(state, state.stack_peek()).ok_or_else(|| {
+                        build_error("Superclass must be a class.", last_line_number(state))
+                    })?;
                 let base_methods = superclass.methods.clone();
-                let subclass = try_load_class_mut(state, &subclass).expect(
+                let (subclass, _) = try_load_class_mut(state, &subclass).expect(
                     "Inherit instruction expects a class type value to be on top of the stack.",
                 );
                 subclass.methods.extend(base_methods);
             }
             OpCode::GetSuper => {
                 let method_name = read_string_constant(state);
-                let (_, superclass) = stack_pop::<&Class>(state).expect(
+                let superclass = state.stack_pop();
+                let (superclass, _) = try_load_class(state, &superclass).expect(
                     "GetSuper instruction expects a class type value to be on top of the stack.",
                 );
-                let closure = if let Some(closure) = superclass.methods.get(&method_name) {
-                    *closure
-                } else {
-                    return Err(build_error(
+                let closure = *superclass.methods.get(&method_name).ok_or_else(|| {
+                    build_error(
                         &format!("Method {} doesn't exist on the superclass.", method_name),
                         last_line_number(state),
-                    ));
-                };
-                let (instance, _) = stack_pop::<&Instance>(state).expect(
+                    )
+                })?;
+                let instance = state.stack_pop();
+                let (_, instance) = try_load_instance(state, &instance).expect(
                     "GetSuper instruction expects an instance type value to be on the stack.",
                 );
                 let bound_method =
@@ -526,7 +527,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::SuperInvoke => {
                 let method_name = read_string_constant(state);
                 let arg_count = read_byte(state);
-                let (_, superclass) = stack_pop::<&Class>(state).expect(
+                let superclass = state.stack_pop();
+                let (superclass, _) = try_load_class(state, &superclass).expect(
                     "SuperInvoke instruction expects a class type value to be on top of the stack.",
                 );
                 if let Some(closure_ref) = superclass.methods.get(&method_name) {
@@ -597,10 +599,12 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
-    let callee_ref = *callee.as_heap_ref().ok_or_else(|| build_error(
-        "Can only call functions and classes.",
-        last_line_number(state),
-    ))?;
+    let callee_ref = *callee.as_heap_ref().ok_or_else(|| {
+        build_error(
+            "Can only call functions and classes.",
+            last_line_number(state),
+        )
+    })?;
 
     // Can't use fn get_heap_value() here because the current implementation requires split borrow on State fields
     let callee = &state.value_heap[callee_ref.0].value;
@@ -795,41 +799,34 @@ fn build_error(message: &str, line: u32) -> BasicError {
     BasicError::new(&format!("Execution error at line {line}: {message}"))
 }
 
-fn pop_ref(state: &mut State) -> Option<HeapRef> {
-    let popped = state.stack_pop();
-    if let Value::HeapRef(location) = popped {
-        Some(location)
-    } else {
-        None
-    }
+// attempts to load a Class using the provided Value::HeapRef
+// returns None if the provided value is not a HeapRef or if the corresponding heap entry is not a Class
+fn try_load_class<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Class, HeapRef)> {
+    let heap_ref = *value.as_heap_ref()?;
+    let class = state.get_heap_value(heap_ref).as_class()?;
+    Some((class, heap_ref))
 }
 
-fn try_load_class<'a>(state: &'a State, heap_ref: &'_ Value) -> Option<&'a Class> {
-    let heap_val = state.get_heap_value(*heap_ref.as_heap_ref()?);
-    heap_val.as_class()
+fn try_load_class_mut<'a>(
+    state: &'a mut State,
+    value: &'_ Value,
+) -> Option<(&'a mut Class, HeapRef)> {
+    let heap_ref = *value.as_heap_ref()?;
+    let class = state.get_heap_value_mut(heap_ref).as_class_mut()?;
+    Some((class, heap_ref))
 }
 
-fn try_load_class_mut<'a>(state: &'a mut State, heap_ref: &'_ Value) -> Option<&'a mut Class> {
-    let heap_val = state.get_heap_value_mut(*heap_ref.as_heap_ref()?);
-    heap_val.as_class_mut()
+fn try_load_instance<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Instance, HeapRef)> {
+    let heap_ref = *value.as_heap_ref()?;
+    let instance = state.get_heap_value(heap_ref).as_instance()?;
+    Some((instance, heap_ref))
 }
 
-fn load_ref_type<'a, T>(state: &'a State, location: Option<HeapRef>) -> Option<T>
-where
-    T: std::convert::TryFrom<&'a HeapValue>,
-{
-    let heap_val = state.get_heap_value(location?);
-    heap_val.try_into().ok()
+fn try_load_closure<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Rc<Closure>, HeapRef)> {
+    let heap_ref = *value.as_heap_ref()?;
+    let closure = state.get_heap_value(heap_ref).as_closure()?;
+    Some((closure, heap_ref))
 }
-
-// TODO: how to handle this?
-// fn load_ref_type_mut<'a, T>(state: &'a mut State, location: HeapRef) -> Option<T>
-// where
-//     T: std::convert::TryFrom<&'a HeapValue>,
-// {
-//     let heap_val = state.get_heap_value_mut(location);
-//     Some(heap_val.try_into().ok()?)
-// }
 
 // *** Old access pattern below
 
@@ -885,16 +882,6 @@ fn stack_pop_instance_mut(state: &mut State) -> Option<(HeapRef, &mut Instance)>
     } else {
         None
     }
-}
-
-// pops a HeapRef off the value stack and, if possible, converts the HeapValue enum ref to the provided inner ref type
-fn stack_pop<'a, T>(state: &'a mut State) -> Option<(HeapRef, T)>
-where
-    T: std::convert::TryFrom<&'a HeapValue>,
-{
-    let (location, heap_val) = stack_pop_reference(state)?;
-    let value: T = heap_val.try_into().ok()?;
-    Some((location, value))
 }
 
 fn stack_peek_class_mut(state: &mut State) -> Option<(HeapRef, &mut Class)> {

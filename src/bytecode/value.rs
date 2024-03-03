@@ -148,33 +148,11 @@ pub struct Class {
     pub methods: HashMap<String, HeapRef>,
 }
 
-impl<'a> TryFrom<&'a HeapValue> for &'a Class {
-    type Error = ();
-    fn try_from(value: &HeapValue) -> Result<&Class, ()> {
-        if let HeapValue::Class(class) = value {
-            Ok(class)
-        } else {
-            Err(())
-        }
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub struct Instance {
     pub debug_class_name: String, // temporary class name copy for easier debugging
     pub class: HeapRef,
     pub fields: HashMap<String, Value>,
-}
-
-impl<'a> TryFrom<&'a HeapValue> for &'a Instance {
-    type Error = ();
-    fn try_from(value: &HeapValue) -> Result<&Instance, ()> {
-        if let HeapValue::Instance(instance) = value {
-            Ok(instance)
-        } else {
-            Err(())
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -187,17 +165,6 @@ pub struct BoundMethod {
 pub struct Closure {
     pub function: Rc<CompiledFunction>,
     pub upvalues: Vec<Rc<Upvalue>>,
-}
-
-impl<'a> TryFrom<&'a HeapValue> for &'a Closure {
-    type Error = ();
-    fn try_from(value: &HeapValue) -> Result<&Closure, ()> {
-        if let HeapValue::Closure(closure) = value {
-            Ok(closure)
-        } else {
-            Err(())
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]
