@@ -52,19 +52,9 @@ impl State {
         self.value_stack.last().unwrap()
     }
 
-    fn stack_peek_mut(&mut self) -> &mut Value {
-        self.value_stack.last_mut().unwrap()
-    }
-
     // offset from the end (stack top)
     fn stack_offset(&self, offset: usize) -> &Value {
         &self.value_stack[self.value_stack.len() - offset - 1]
-    }
-
-    // offset from the end (stack top)
-    fn stack_offset_mut(&mut self, offset: usize) -> &mut Value {
-        let index = self.value_stack.len() - offset - 1;
-        &mut self.value_stack[index]
     }
 
     fn get_heap_value(&self, loc: HeapRef) -> &HeapValue {
@@ -449,12 +439,13 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Method => {
                 let name = read_string_constant(state);
                 let closure = state.stack_pop();
-                let (_, closure_ref) = try_load_closure(state, &closure).expect(
+                let (_, closure) = try_load_closure(state, &closure).expect(
                     "Method instruction expects a closure type value to be on top of the stack.",
                 );
-                let (_, class) = stack_peek_class_mut(state)
+                let class = state.stack_peek().clone();
+                let (class, _) = try_load_class_mut(state, &class)
                     .expect("The target class must be on the value stack for method creation.");
-                class.methods.insert(name, closure_ref);
+                class.methods.insert(name, closure);
             }
             OpCode::Invoke => {
                 let property_name = read_string_constant(state);
@@ -481,14 +472,14 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                             last_line_number(state),
                         )
                     })?;
-                    // optimized calling convention for class methods only: the receiving instance is already in place at stack slot zero, just call the closure value 
+                    // optimized calling convention for class methods only: the receiving instance is already in place at stack slot zero, just call the closure value
                     Value::HeapRef(*closure)
                 };
                 call_value(state, callable, arg_count)?;
             }
             OpCode::Inherit => {
                 let subclass = state.stack_pop();
-                // leave the superclass on the stack, this local slot is needed for any references to "super"
+                // leave the superclass on the stack, this local slot is used for any references to "super"
                 let (superclass, _) =
                     try_load_class(state, state.stack_peek()).ok_or_else(|| {
                         build_error("Superclass must be a class.", last_line_number(state))
@@ -526,17 +517,15 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 let (superclass, _) = try_load_class(state, &superclass).expect(
                     "SuperInvoke instruction expects a class type value to be on top of the stack.",
                 );
-                if let Some(closure_ref) = superclass.methods.get(&method_name) {
-                    // it's possible to call the method like a closure in this case because
-                    // the receiver instance is already in place on the stack, no need to create a method binding
-                    let callee = Value::HeapRef(*closure_ref);
-                    call_value(state, callee, arg_count)?;
-                } else {
-                    return Err(build_error(
+                let closure = *superclass.methods.get(&method_name).ok_or_else(|| {
+                    build_error(
                         &format!("Method {} doesn't exist on the superclass.", method_name),
                         last_line_number(state),
-                    ));
-                };
+                    )
+                })?;
+                // it's possible to call the method like a closure in this case because
+                // the receiver instance is already in place on the stack, no need to create a method binding
+                call_value(state, Value::HeapRef(closure), arg_count)?;
             }
         }
 
@@ -609,7 +598,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
 
     match callee {
         HeapValue::BoundMethod(method) => {
-            let closure = get_closure(state, method.closure);
+            let closure = load_closure_for_method(state, method);
             if closure.function.arity != arg_count {
                 return Err(build_error(
                     &format!(
@@ -674,7 +663,10 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         HeapValue::Class(class) => {
             // automatically run a class's type initializer (init() method) if it exists
             if let Some(location) = class.methods.get(code::TYPE_INITIALIZER_METHOD) {
-                let closure = get_closure(state, *location).clone();
+                let closure = try_load_closure(state, &Value::HeapRef(*location))
+                    .unwrap_or_else(|| panic!("Method entry on class {} points to value at HeapRef({}) that isn't a closure.", class.name, location))
+                    .0
+                    .clone();
                 if closure.function.arity != arg_count {
                     return Err(build_error(
                         &format!(
@@ -839,30 +831,10 @@ fn load_class_for_instance<'a>(state: &'a State, instance: &'_ Instance) -> &'a 
     }
 }
 
-// *** Old access pattern below
-
-fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
-    let top = state.stack_peek();
-    if let Value::HeapRef(location) = top {
-        Some((*location, state.get_heap_value_mut(*location)))
-    } else {
-        None
-    }
-}
-
-fn stack_peek_class_mut(state: &mut State) -> Option<(HeapRef, &mut Class)> {
-    let value = stack_peek_reference_mut(state);
-    if let Some((location, HeapValue::Class(class))) = value {
-        Some((location, class))
-    } else {
-        None
-    }
-}
-
-fn get_closure(state: &State, location: HeapRef) -> &Rc<Closure> {
-    if let HeapValue::Closure(closure) = state.get_heap_value(location) {
+fn load_closure_for_method<'a>(state: &'a State, method: &'_ BoundMethod) -> &'a Rc<Closure> {
+    if let HeapValue::Closure(closure) = state.get_heap_value(method.closure) {
         closure
     } else {
-        panic!("Expected closure at heap index {}", location);
+        panic!("Error loading closure for BoundMethod attached to instance at HeapRef({}): The value at HeapRef({}) is not a closure.", method.closure, method.instance);
     }
 }
