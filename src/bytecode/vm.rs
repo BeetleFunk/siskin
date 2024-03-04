@@ -384,9 +384,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::CloseUpvalue => {
                 let stack_index = state.value_stack.len() - 1;
                 let value = state.stack_pop();
-                let upvalue_closed = close_upvalue(state, stack_index, value);
-                // for sanity checking and troubleshooting
-                if !upvalue_closed {
+                // The compiler only emits this instruction when there's a known upvalue.
+                // If no match is found then something is broken!
+                if !close_upvalue(state, stack_index, value) {
                     panic!("CloseUpvalue instruction did not find open upvalue")
                 }
             }
@@ -400,40 +400,40 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             }
             OpCode::GetProperty => {
                 let property_name = read_string_constant(state);
+                let instance = state.stack_pop();
+                let (instance, instance_ref) =
+                    try_load_instance(state, &instance).ok_or_else(|| {
+                        build_error(
+                            "Property access only allowed for instances.",
+                            last_line_number(state),
+                        )
+                    })?;
                 // fields take precedence over and can shadow class methods
-                if let Some((location, instance)) = stack_pop_instance(state) {
-                    if let Some(field_value) = instance.fields.get(&property_name) {
-                        let value_copy = field_value.clone();
-                        state.value_stack.push(value_copy);
-                    } else {
-                        let class = instance.class;
-                        let class = get_class(state, class);
-                        if let Some(closure) = class.methods.get(&property_name) {
-                            let bound_method = HeapValue::from(BoundMethod {
-                                instance: location,
-                                closure: *closure,
-                            });
-                            let bound_method = state.place_on_heap(bound_method);
-                            state.value_stack.push(bound_method);
-                        } else {
-                            return Err(build_error(
-                                &format!("Undefined property '{}'.", property_name),
-                                last_line_number(state),
-                            ));
-                        }
-                    }
+                if let Some(field_value) = instance.fields.get(&property_name) {
+                    state.value_stack.push(field_value.clone());
                 } else {
-                    return Err(build_error(
-                        "Property access only allowed for instances.",
-                        last_line_number(state),
-                    ));
+                    // create the binding on demand if the property name matches a class method
+                    let class = load_class_for_instance(state, instance);
+                    let closure = class.methods.get(&property_name).ok_or_else(|| {
+                        build_error(
+                            &format!("Undefined property '{}'.", property_name),
+                            last_line_number(state),
+                        )
+                    })?;
+                    let bound_method = HeapValue::from(BoundMethod {
+                        instance: instance_ref,
+                        closure: *closure,
+                    });
+                    let bound_method = state.place_on_heap(bound_method);
+                    state.value_stack.push(bound_method);
                 }
             }
             OpCode::SetProperty => {
                 let property_name = read_string_constant(state);
                 // the value to set will be at the top of the stack and the instance will be the next entry after that
                 let property_value = state.stack_pop();
-                if let Some((_, instance)) = stack_pop_instance_mut(state) {
+                let instance = state.stack_pop();
+                if let Some((instance, _)) = try_load_instance_mut(state, &instance) {
                     instance
                         .fields
                         .insert(property_name, property_value.clone());
@@ -459,37 +459,32 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Invoke => {
                 let property_name = read_string_constant(state);
                 let arg_count = read_byte(state);
-                let receiver = stack_peek_reference(state, arg_count as usize);
-
-                if let Some((_, HeapValue::Instance(instance))) = receiver {
-                    // fields take precedence and can shadow methods
-                    let closure = if instance.fields.contains_key(&property_name) {
-                        let field_value = instance.fields.get(&property_name).unwrap().clone();
-                        // standard calling convention when invoking the value on a field: stack slot zero (the method receiver) should be the closure itself
-                        let receiver_stack_index =
-                            state.value_stack.len() - (arg_count as usize) - 1;
-                        state.value_stack[receiver_stack_index] = field_value.clone();
-                        field_value
-                    } else {
-                        let class = instance.class;
-                        let class = get_class(state, class);
-                        if let Some(closure) = class.methods.get(&property_name) {
-                            // it's possible to call the method like a closure in this case because the receiver instance is already in place on the stack, no need to create a method binding
-                            Value::HeapRef(*closure)
-                        } else {
-                            return Err(build_error(
-                                &format!("Undefined property '{}'.", property_name),
-                                last_line_number(state),
-                            ));
-                        }
-                    };
-                    call_value(state, closure, arg_count)?;
-                } else {
-                    return Err(build_error(
+                let instance = state.stack_offset(arg_count as usize);
+                let (instance, _) = try_load_instance(state, instance).ok_or_else(|| {
+                    build_error(
                         "Property access only allowed for instances.",
                         last_line_number(state),
-                    ));
-                }
+                    )
+                })?;
+                // fields take precedence and can shadow class methods
+                let callable = if let Some(field_value) = instance.fields.get(&property_name) {
+                    // standard convention when invoking a callable value: stack slot zero (the method receiver) should be set to the callable itself
+                    let receiver_stack_index = state.value_stack.len() - (arg_count as usize) - 1;
+                    let callable = field_value.clone();
+                    state.value_stack[receiver_stack_index] = callable.clone();
+                    callable
+                } else {
+                    let class = load_class_for_instance(state, instance);
+                    let closure = class.methods.get(&property_name).ok_or_else(|| {
+                        build_error(
+                            &format!("Undefined property '{}'.", property_name),
+                            last_line_number(state),
+                        )
+                    })?;
+                    // optimized calling convention for class methods only: the receiving instance is already in place at stack slot zero, just call the closure value 
+                    Value::HeapRef(*closure)
+                };
+                call_value(state, callable, arg_count)?;
             }
             OpCode::Inherit => {
                 let subclass = state.stack_pop();
@@ -720,19 +715,17 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
 
 fn capture_upvalue(state: &mut State, stack_index: usize) -> Rc<Upvalue> {
     let open_upvalues_rev = state.open_upvalues.iter().rev();
+    // TODO: can this can be optimized by stopping as soon as a lower stack index is encountered (i.e. is [open_upvalues.stack_index] monotonic?)
     for upvalue in open_upvalues_rev {
         if upvalue.stack_index == stack_index {
-            println!("Found existing upvalue for stack slot {stack_index}.");
             return upvalue.clone();
         }
     }
-
     let upvalue = Rc::new(Upvalue {
         stack_index,
         closed: RefCell::new(None),
     });
     state.open_upvalues.push(upvalue.clone());
-    println!("Creating upvalue for stack slot {stack_index}.");
     upvalue
 }
 
@@ -822,63 +815,36 @@ fn try_load_instance<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Inst
     Some((instance, heap_ref))
 }
 
+fn try_load_instance_mut<'a>(
+    state: &'a mut State,
+    value: &'_ Value,
+) -> Option<(&'a mut Instance, HeapRef)> {
+    let heap_ref = *value.as_heap_ref()?;
+    let instance = state.get_heap_value_mut(heap_ref).as_instance_mut()?;
+    Some((instance, heap_ref))
+}
+
 fn try_load_closure<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Rc<Closure>, HeapRef)> {
     let heap_ref = *value.as_heap_ref()?;
     let closure = state.get_heap_value(heap_ref).as_closure()?;
     Some((closure, heap_ref))
 }
 
-// *** Old access pattern below
-
-fn stack_peek_reference(state: &State, offset: usize) -> Option<(HeapRef, &HeapValue)> {
-    let stack_entry = &state.value_stack[state.value_stack.len() - offset - 1];
-    if let Value::HeapRef(location) = stack_entry {
-        Some((*location, state.get_heap_value(*location)))
+fn load_class_for_instance<'a>(state: &'a State, instance: &'_ Instance) -> &'a Class {
+    if let HeapValue::Class(class) = state.get_heap_value(instance.class) {
+        class
     } else {
-        None
+        // an instance should always point to a valid class, anything else would indicate a bug around instance creation or VM corruption
+        panic!("Error loading class type {} for instance: The value at heap location {} is not a class.", instance.debug_class_name, instance.class);
     }
 }
+
+// *** Old access pattern below
 
 fn stack_peek_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
     let top = state.stack_peek();
     if let Value::HeapRef(location) = top {
         Some((*location, state.get_heap_value_mut(*location)))
-    } else {
-        None
-    }
-}
-
-fn stack_pop_reference(state: &mut State) -> Option<(HeapRef, &HeapValue)> {
-    let popped = state.stack_pop();
-    if let Value::HeapRef(location) = popped {
-        Some((location, state.get_heap_value(location)))
-    } else {
-        None
-    }
-}
-
-fn stack_pop_reference_mut(state: &mut State) -> Option<(HeapRef, &mut HeapValue)> {
-    let popped = state.stack_pop();
-    if let Value::HeapRef(location) = popped {
-        Some((location, state.get_heap_value_mut(location)))
-    } else {
-        None
-    }
-}
-
-fn stack_pop_instance(state: &mut State) -> Option<(HeapRef, &Instance)> {
-    let value = stack_pop_reference(state);
-    if let Some((location, HeapValue::Instance(instance))) = value {
-        Some((location, instance))
-    } else {
-        None
-    }
-}
-
-fn stack_pop_instance_mut(state: &mut State) -> Option<(HeapRef, &mut Instance)> {
-    let value = stack_pop_reference_mut(state);
-    if let Some((location, HeapValue::Instance(instance))) = value {
-        Some((location, instance))
     } else {
         None
     }
@@ -898,13 +864,5 @@ fn get_closure(state: &State, location: HeapRef) -> &Rc<Closure> {
         closure
     } else {
         panic!("Expected closure at heap index {}", location);
-    }
-}
-
-fn get_class(state: &State, location: HeapRef) -> &Class {
-    if let HeapValue::Class(class) = state.get_heap_value(location) {
-        class
-    } else {
-        panic!("Expected class at heap index {}", location.0);
     }
 }
