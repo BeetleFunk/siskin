@@ -10,7 +10,7 @@ use once_cell::sync::Lazy;
 // TODO: make this thread local and avoid requirement on sync?
 static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 
-pub fn standard_library() -> Vec<NativeFunction> {
+pub fn native_functions() -> Vec<NativeFunction> {
     vec![
         NativeFunction {
             arity: 0,

@@ -84,7 +84,7 @@ impl State {
 
 // add standard library native functions into the globals
 fn setup_stdlib(state: &mut State) {
-    let stdlib = stdlib::standard_library();
+    let stdlib = stdlib::native_functions();
     for func in stdlib {
         let name = func.name.clone();
         let heap_entry = state.place_on_heap(HeapValue::from(func));
@@ -615,8 +615,8 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             let args = &state.value_stack[args_begin..state.value_stack.len()];
             // run the native function directly
             let result = (native_function.func)(&state.value_heap, args);
-            // pop arguments and make sure to pop the native function callable itself which is the entry before the first argument
-            state.value_stack.drain(locals_base..state.value_stack.len());
+            // pop the native function callable as well as all the function arguments
+            state.value_stack.truncate(locals_base);
 
             if let Err(e) = result {
                 return Err(build_error(
