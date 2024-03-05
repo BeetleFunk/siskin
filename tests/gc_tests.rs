@@ -9,7 +9,7 @@ fn run(code: &str) -> error::BasicResult<String> {
     let mut buffer = Vec::new();
     bytecode::execute(code, &mut buffer)?;
 
-    let output = std::str::from_utf8(&buffer.as_slice()).unwrap();
+    let output = std::str::from_utf8(buffer.as_slice()).unwrap();
 
     Ok(output.to_string())
 }

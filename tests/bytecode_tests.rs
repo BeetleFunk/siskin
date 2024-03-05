@@ -9,7 +9,7 @@ fn run(code: &str) -> error::BasicResult<String> {
     let mut buffer = Vec::new();
     bytecode::execute(code, &mut buffer)?;
 
-    let output = std::str::from_utf8(&buffer.as_slice()).unwrap();
+    let output = std::str::from_utf8(buffer.as_slice()).unwrap();
 
     Ok(output.to_string())
 }
@@ -387,7 +387,7 @@ fn native_function() -> TestResult {
 
     let output = run(code)?;
 
-    assert!(output.starts_with("8"));
+    assert!(output.starts_with('8'));
     assert!(output.contains("2584"));
 
     Ok(())
@@ -861,6 +861,17 @@ fn basic_inheritance() -> TestResult {
 
     let output = run(code)?;
     assert_eq!("Asplode!\n", output);
+    Ok(())
+}
+
+#[test]
+fn superclass_type_error() -> TestResult {
+    let code = "\
+        var NotAClass = 5;
+        class Child < NotAClass {}
+        var object = Child();";
+    let error = run(code).unwrap_err();
+    assert!(error.description.contains("Superclass must be a class."));
     Ok(())
 }
 

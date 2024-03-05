@@ -4,13 +4,15 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
+use enum_as_inner::EnumAsInner;
+
 use crate::error::BasicResult;
 
 use super::code::{CompiledConstant, CompiledFunction};
 
 const TRACE_VALUE_DROP: bool = false;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, EnumAsInner, PartialEq)]
 pub enum Value {
     Bool(bool),
     Nil,
@@ -85,7 +87,7 @@ pub struct HeapEntry {
     pub value: HeapValue,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, EnumAsInner, PartialEq)]
 pub enum HeapValue {
     Class(Class),
     Instance(Instance),

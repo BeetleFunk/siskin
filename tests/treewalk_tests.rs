@@ -9,7 +9,7 @@ fn run(code: &str) -> error::GenericResult<String> {
     let mut env = treewalk::environment::Environment::new(&mut buffer);
     treewalk::execute(code, &mut env)?;
 
-    let output = std::str::from_utf8(&buffer.as_slice())?;
+    let output = std::str::from_utf8(buffer.as_slice())?;
 
     Ok(output.to_string())
 }
