@@ -137,13 +137,11 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
         match opcode {
             OpCode::Return => {
                 let result = state.stack_pop();
-                let previous_frame = state.call_stack.pop().unwrap();
+                pop_call_frame(state);
                 if state.call_stack.is_empty() {
                     // hit the end of the root function (script toplevel)
                     break;
                 } else {
-                    // pop all locals left by the previous frame as well as the callee itself
-                    drain_stack_and_close_upvalues(state, previous_frame.locals_base);
                     // leave the function result on top of the stack
                     state.value_stack.push(result);
                 }
@@ -747,18 +745,18 @@ fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
     }
 }
 
-// remove all entries at and above stack_index_begin, and close any corresponding upvalues
-fn drain_stack_and_close_upvalues(state: &mut State, stack_index_begin: usize) {
-    let end = state.value_stack.len();
-    let popped_values_rev: Vec<Value> = state
+// pop the last call frame, remove stack locals for that frame, and close any upvalues referencing those locals
+fn pop_call_frame(state: &mut State) {
+    let frame = state.call_stack.pop().unwrap();
+    let locals_range = frame.locals_base..state.value_stack.len();
+    let popped_values_rev: Vec<_> = state
         .value_stack
-        .drain(stack_index_begin..end)
+        .drain(locals_range.clone())
         .rev()
         .collect();
-    let mut stack_index_rev = (stack_index_begin..end).rev();
-    for value in popped_values_rev {
+    for (stack_index, value) in std::iter::zip(locals_range.rev(), popped_values_rev) {
         // TODO: can this can be optimized by stopping as soon as a lower stack index is reached in the upvalue reverse list search?
-        close_upvalue(state, stack_index_rev.next().unwrap(), value);
+        close_upvalue(state, stack_index, value);
     }
 }
 
