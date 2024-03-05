@@ -30,12 +30,9 @@ fn declaration(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn function(cursor: &mut TokenCursor) -> StmtResult {
-    cursor.advance_if_match(&TokenType::Fun).ok_or_else(|| {
-        build_error(
-            "Function declaration with invalid token.",
-            cursor.peek().line,
-        )
-    })?;
+    cursor
+        .advance_if_match(&TokenType::Fun)
+        .ok_or_else(|| build_error("Function declaration with invalid token.", cursor.peek().line))?;
 
     let name = cursor
         .advance_if_match(&TokenType::Identifier)
@@ -50,12 +47,7 @@ fn function(cursor: &mut TokenCursor) -> StmtResult {
         loop {
             let param = cursor
                 .advance_if_match(&TokenType::Identifier)
-                .ok_or_else(|| {
-                    build_error(
-                        "Expected identifiers only in parameter list.",
-                        cursor.peek().line,
-                    )
-                })?;
+                .ok_or_else(|| build_error("Expected identifiers only in parameter list.", cursor.peek().line))?;
             params.push(param);
 
             // keep grabbing the next argument as long as the following token is a comma
@@ -78,12 +70,9 @@ fn function(cursor: &mut TokenCursor) -> StmtResult {
 }
 
 fn var_declaration(cursor: &mut TokenCursor) -> StmtResult {
-    cursor.advance_if_match(&TokenType::Var).ok_or_else(|| {
-        build_error(
-            "Variable declaration with invalid token.",
-            cursor.peek().line,
-        )
-    })?;
+    cursor
+        .advance_if_match(&TokenType::Var)
+        .ok_or_else(|| build_error("Variable declaration with invalid token.", cursor.peek().line))?;
 
     let name = cursor
         .advance_if_match(&TokenType::Identifier)
@@ -139,9 +128,7 @@ fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
     let initializer = match cursor.peek().token_type {
         TokenType::Semicolon => {
             cursor.advance();
-            Stmt::Block {
-                statements: Vec::new(),
-            }
+            Stmt::Block { statements: Vec::new() }
         } // stand-in for empty statement
         TokenType::Var => var_declaration(cursor)?,
         _ => expression_statement(cursor)?,
@@ -174,12 +161,7 @@ fn for_statement(cursor: &mut TokenCursor) -> StmtResult {
     // transform for loop components into equivalent block statement containing initializer and while loop
 
     let while_body = Stmt::Block {
-        statements: vec![
-            for_body,
-            Stmt::Expression {
-                expression: increment,
-            },
-        ],
+        statements: vec![for_body, Stmt::Expression { expression: increment }],
     };
     let while_loop = Stmt::While {
         condition,
@@ -289,12 +271,7 @@ fn assignment(cursor: &mut TokenCursor) -> ExprResult {
                     value: Box::new(value),
                 }
             }
-            _ => {
-                return Err(Box::new(build_error(
-                    "Invalid assignment target.",
-                    equal.line,
-                )))
-            }
+            _ => return Err(Box::new(build_error("Invalid assignment target.", equal.line))),
         };
     }
 
@@ -329,11 +306,7 @@ fn logical_expression(
 }
 
 fn equality(cursor: &mut TokenCursor) -> ExprResult {
-    binary_left_associative(
-        cursor,
-        comparison,
-        &[TokenType::BangEqual, TokenType::EqualEqual],
-    )
+    binary_left_associative(cursor, comparison, &[TokenType::BangEqual, TokenType::EqualEqual])
 }
 
 fn comparison(cursor: &mut TokenCursor) -> ExprResult {
@@ -427,11 +400,7 @@ fn primary(cursor: &mut TokenCursor) -> ExprResult {
     let current = cursor.peek();
 
     match current.token_type {
-        TokenType::False
-        | TokenType::True
-        | TokenType::Nil
-        | TokenType::Number
-        | TokenType::String => {
+        TokenType::False | TokenType::True | TokenType::Nil | TokenType::Number | TokenType::String => {
             let literal = Expr::Literal {
                 value: LiteralValue::from(current),
             };
@@ -448,9 +417,7 @@ fn primary(cursor: &mut TokenCursor) -> ExprResult {
             let expr = expression(cursor)?;
             cursor
                 .advance_if_match(&TokenType::RightParen)
-                .ok_or_else(|| {
-                    build_error("Expect ')' after grouping expression.", cursor.peek().line)
-                })?;
+                .ok_or_else(|| build_error("Expect ')' after grouping expression.", cursor.peek().line))?;
             Ok(Expr::Grouping {
                 expression: Box::new(expr),
             })

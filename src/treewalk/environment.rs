@@ -87,12 +87,8 @@ impl<'a> Environment<'a> {
         // if count would go to zero, remove the entry entirely
         if object.ref_count == 1 {
             if DIAGNOSTICS {
-                writeln!(
-                    self.output_writer,
-                    "Removing object from heap: {}",
-                    reference.id
-                )
-                .expect("Writing to program output should always succeed.");
+                writeln!(self.output_writer, "Removing object from heap: {}", reference.id)
+                    .expect("Writing to program output should always succeed.");
             }
 
             // remove the object first to take ownership and release the mutable borrow
@@ -130,9 +126,7 @@ impl<'a> Environment<'a> {
                 reference
             }
             SiskinValue::Literal(value) => {
-                let reference = Reference {
-                    id: self.current_refid,
-                };
+                let reference = Reference { id: self.current_refid };
                 self.current_refid += 1;
                 self.heap.insert(
                     reference.clone(),
@@ -146,15 +140,14 @@ impl<'a> Environment<'a> {
             SiskinValue::Function(func) => {
                 // increment ref count for all captured vars
                 for captured in func.captured_vars.values() {
-                    let object = self.heap.get_mut(captured).expect(
-                        "Captured variables included a reference that was not on the heap.",
-                    );
+                    let object = self
+                        .heap
+                        .get_mut(captured)
+                        .expect("Captured variables included a reference that was not on the heap.");
                     object.ref_count += 1;
                 }
                 // create the new heap object for the function
-                let reference = Reference {
-                    id: self.current_refid,
-                };
+                let reference = Reference { id: self.current_refid };
                 self.current_refid += 1;
                 self.heap.insert(
                     reference.clone(),
@@ -173,10 +166,7 @@ impl<'a> Environment<'a> {
     }
 
     pub fn pop(&mut self) {
-        let frame = self
-            .stack
-            .pop()
-            .expect("Attempted to pop empty Environment stack."); // panic here because this would indicate a bug in the interpreter
+        let frame = self.stack.pop().expect("Attempted to pop empty Environment stack."); // panic here because this would indicate a bug in the interpreter
 
         // update ref counts and remove unused vars
         for (var_name, reference) in frame {
@@ -229,21 +219,17 @@ impl<'a> Environment<'a> {
                 }
             };
 
-            let entry = self
-                .heap
-                .get_mut(&reference)
-                .expect("Mapped reference should exist.");
+            let entry = self.heap.get_mut(&reference).expect("Mapped reference should exist.");
 
-            let cleanup_refs: Option<Vec<Reference>> =
-                if let HeapValue::Function(func) = &entry.value {
-                    let mut captured = Vec::new();
-                    for capture in func.captured_vars.values() {
-                        captured.push(capture.clone());
-                    }
-                    Option::Some(captured)
-                } else {
-                    Option::None
-                };
+            let cleanup_refs: Option<Vec<Reference>> = if let HeapValue::Function(func) = &entry.value {
+                let mut captured = Vec::new();
+                for capture in func.captured_vars.values() {
+                    captured.push(capture.clone());
+                }
+                Option::Some(captured)
+            } else {
+                Option::None
+            };
 
             entry.value = new_value;
 
@@ -255,9 +241,7 @@ impl<'a> Environment<'a> {
 
             Ok(())
         } else {
-            Err(Box::new(BasicError::new(&format!(
-                "Undefined variable ({name})"
-            ))))
+            Err(Box::new(BasicError::new(&format!("Undefined variable ({name})"))))
         }
     }
 

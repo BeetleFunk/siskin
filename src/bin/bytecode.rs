@@ -1,5 +1,5 @@
-use siskin::error;
 use siskin::bytecode;
+use siskin::error;
 
 use std::env;
 use std::fs;
@@ -15,7 +15,7 @@ fn main() -> error::GenericResult<()> {
     //     args.remove(0);
     // }
 
-    #[allow(clippy::comparison_chain)] 
+    #[allow(clippy::comparison_chain)]
     if args.len() > 1 {
         println!("Usage: siskin [script]");
         Err(Box::new(error::BasicError::new("Too many input arguments")))

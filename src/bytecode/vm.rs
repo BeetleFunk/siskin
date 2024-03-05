@@ -9,9 +9,7 @@ use crate::error::{BasicError, BasicResult};
 use super::code::{self, CompiledConstant, CompiledFunction, OpCode};
 use super::gc;
 use super::stdlib;
-use super::value::{
-    BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, Upvalue, Value,
-};
+use super::value::{BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, Upvalue, Value};
 
 const DEBUG_TRACING: bool = false;
 
@@ -247,11 +245,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::True => state.value_stack.push(Value::Bool(true)),
             OpCode::False => state.value_stack.push(Value::Bool(false)),
             OpCode::Print => {
-                let printed = state
-                    .value_stack
-                    .pop()
-                    .unwrap()
-                    .to_string(&state.value_heap);
+                let printed = state.value_stack.pop().unwrap().to_string(&state.value_heap);
                 writeln!(output, "{}", printed).expect("Output writer should succeed.");
             }
             OpCode::Pop => {
@@ -291,9 +285,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::GetLocal => {
                 let slot = read_byte(state);
                 let local_index = state.frame().locals_base + (slot as usize);
-                state
-                    .value_stack
-                    .push(state.value_stack[local_index].clone());
+                state.value_stack.push(state.value_stack[local_index].clone());
             }
             OpCode::SetLocal => {
                 let slot = read_byte(state);
@@ -338,8 +330,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                         upvalues.push(capture_upvalue(state, stack_index));
                     } else {
                         // copy the upvalue from the enclosing function (current frame on the top of the call stack)
-                        let enclosing_upvalue =
-                            &state.frame().closure.upvalues[slot_index as usize];
+                        let enclosing_upvalue = &state.frame().closure.upvalues[slot_index as usize];
                         upvalues.push(enclosing_upvalue.clone())
                     }
                 }
@@ -389,13 +380,9 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::GetProperty => {
                 let property_name = read_string_constant(state);
                 let instance = state.stack_pop();
-                let (instance, instance_ref) =
-                    try_load_instance(state, &instance).ok_or_else(|| {
-                        build_error(
-                            "Property access only allowed for instances.",
-                            last_line_number(state),
-                        )
-                    })?;
+                let (instance, instance_ref) = try_load_instance(state, &instance).ok_or_else(|| {
+                    build_error("Property access only allowed for instances.", last_line_number(state))
+                })?;
                 // fields take precedence over and can shadow class methods
                 if let Some(field_value) = instance.fields.get(&property_name) {
                     state.value_stack.push(field_value.clone());
@@ -422,9 +409,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 let property_value = state.stack_pop();
                 let instance = state.stack_pop();
                 if let Some((instance, _)) = try_load_instance_mut(state, &instance) {
-                    instance
-                        .fields
-                        .insert(property_name, property_value.clone());
+                    instance.fields.insert(property_name, property_value.clone());
                     // leave the value on top of the stack (the result of an assignment expression can be used by another expression)
                     state.value_stack.push(property_value);
                 } else {
@@ -437,9 +422,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Method => {
                 let name = read_string_constant(state);
                 let closure = state.stack_pop();
-                let (_, closure) = try_load_closure(state, &closure).expect(
-                    "Method instruction expects a closure type value to be on top of the stack.",
-                );
+                let (_, closure) = try_load_closure(state, &closure)
+                    .expect("Method instruction expects a closure type value to be on top of the stack.");
                 let class = state.stack_peek().clone();
                 let (class, _) = try_load_class_mut(state, &class)
                     .expect("The target class must be on the value stack for method creation.");
@@ -450,10 +434,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 let arg_count = read_byte(state);
                 let instance = state.stack_offset(arg_count as usize);
                 let (instance, _) = try_load_instance(state, instance).ok_or_else(|| {
-                    build_error(
-                        "Property access only allowed for instances.",
-                        last_line_number(state),
-                    )
+                    build_error("Property access only allowed for instances.", last_line_number(state))
                 })?;
                 // fields take precedence and can shadow class methods
                 let callable = if let Some(field_value) = instance.fields.get(&property_name) {
@@ -478,22 +459,18 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::Inherit => {
                 let subclass = state.stack_pop();
                 // leave the superclass on the stack, this local slot is used for any references to "super"
-                let (superclass, _) =
-                    try_load_class(state, state.stack_peek()).ok_or_else(|| {
-                        build_error("Superclass must be a class.", last_line_number(state))
-                    })?;
+                let (superclass, _) = try_load_class(state, state.stack_peek())
+                    .ok_or_else(|| build_error("Superclass must be a class.", last_line_number(state)))?;
                 let base_methods = superclass.methods.clone();
-                let (subclass, _) = try_load_class_mut(state, &subclass).expect(
-                    "Inherit instruction expects a class type value to be on top of the stack.",
-                );
+                let (subclass, _) = try_load_class_mut(state, &subclass)
+                    .expect("Inherit instruction expects a class type value to be on top of the stack.");
                 subclass.methods.extend(base_methods);
             }
             OpCode::GetSuper => {
                 let method_name = read_string_constant(state);
                 let superclass = state.stack_pop();
-                let (superclass, _) = try_load_class(state, &superclass).expect(
-                    "GetSuper instruction expects a class type value to be on top of the stack.",
-                );
+                let (superclass, _) = try_load_class(state, &superclass)
+                    .expect("GetSuper instruction expects a class type value to be on top of the stack.");
                 let closure = *superclass.methods.get(&method_name).ok_or_else(|| {
                     build_error(
                         &format!("Method {} doesn't exist on the superclass.", method_name),
@@ -501,20 +478,17 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     )
                 })?;
                 let instance = state.stack_pop();
-                let (_, instance) = try_load_instance(state, &instance).expect(
-                    "GetSuper instruction expects an instance type value to be on the stack.",
-                );
-                let bound_method =
-                    state.place_on_heap(HeapValue::from(BoundMethod { instance, closure }));
+                let (_, instance) = try_load_instance(state, &instance)
+                    .expect("GetSuper instruction expects an instance type value to be on the stack.");
+                let bound_method = state.place_on_heap(HeapValue::from(BoundMethod { instance, closure }));
                 state.value_stack.push(bound_method);
             }
             OpCode::SuperInvoke => {
                 let method_name = read_string_constant(state);
                 let arg_count = read_byte(state);
                 let superclass = state.stack_pop();
-                let (superclass, _) = try_load_class(state, &superclass).expect(
-                    "SuperInvoke instruction expects a class type value to be on top of the stack.",
-                );
+                let (superclass, _) = try_load_class(state, &superclass)
+                    .expect("SuperInvoke instruction expects a class type value to be on top of the stack.");
                 let closure = *superclass.methods.get(&method_name).ok_or_else(|| {
                     build_error(
                         &format!("Method {} doesn't exist on the superclass.", method_name),
@@ -581,12 +555,9 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
         return Err(build_error("Stack overflow.", last_line_number(state)));
     }
 
-    let callee_ref = *callee.as_heap_ref().ok_or_else(|| {
-        build_error(
-            "Can only call functions and classes.",
-            last_line_number(state),
-        )
-    })?;
+    let callee_ref = *callee
+        .as_heap_ref()
+        .ok_or_else(|| build_error("Can only call functions and classes.", last_line_number(state)))?;
 
     // Can't use fn get_heap_value() here because the current implementation requires split borrow on State fields
     let callee = &state.value_heap[callee_ref.0].value;
@@ -645,9 +616,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             // run the native function directly
             let result = (native_function.func)(&state.value_heap, args);
             // pop arguments and make sure to pop the native function callable itself which is the entry before the first argument
-            state
-                .value_stack
-                .drain(locals_base..state.value_stack.len());
+            state.value_stack.drain(locals_base..state.value_stack.len());
 
             if let Err(e) = result {
                 return Err(build_error(
@@ -662,7 +631,12 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             // automatically run a class's type initializer (init() method) if it exists
             if let Some(location) = class.methods.get(code::TYPE_INITIALIZER_METHOD) {
                 let closure = try_load_closure(state, &Value::HeapRef(*location))
-                    .unwrap_or_else(|| panic!("Method entry on class {} points to value at HeapRef({}) that isn't a closure.", class.name, location))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Method entry on class {} points to value at HeapRef({}) that isn't a closure.",
+                            class.name, location
+                        )
+                    })
                     .0
                     .clone();
                 if closure.function.arity != arg_count {
@@ -681,9 +655,12 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
                 })
             } else if arg_count != 0 {
                 return Err(build_error(
-                        &format!("Unexpected arguments to initializer for class {} that has no init() method.", class.name),
-                        last_line_number(state),
-                    ));
+                    &format!(
+                        "Unexpected arguments to initializer for class {} that has no init() method.",
+                        class.name
+                    ),
+                    last_line_number(state),
+                ));
             }
             let instance = HeapValue::from(Instance {
                 debug_class_name: class.name.clone(),
@@ -749,11 +726,7 @@ fn close_upvalue(state: &mut State, stack_index: usize, value: Value) -> bool {
 fn pop_call_frame(state: &mut State) {
     let frame = state.call_stack.pop().unwrap();
     let locals_range = frame.locals_base..state.value_stack.len();
-    let popped_values_rev: Vec<_> = state
-        .value_stack
-        .drain(locals_range.clone())
-        .rev()
-        .collect();
+    let popped_values_rev: Vec<_> = state.value_stack.drain(locals_range.clone()).rev().collect();
     for (stack_index, value) in std::iter::zip(locals_range.rev(), popped_values_rev) {
         // TODO: can this can be optimized by stopping as soon as a lower stack index is reached in the upvalue reverse list search?
         close_upvalue(state, stack_index, value);
@@ -790,10 +763,7 @@ fn try_load_class<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Class, 
     Some((class, heap_ref))
 }
 
-fn try_load_class_mut<'a>(
-    state: &'a mut State,
-    value: &'_ Value,
-) -> Option<(&'a mut Class, HeapRef)> {
+fn try_load_class_mut<'a>(state: &'a mut State, value: &'_ Value) -> Option<(&'a mut Class, HeapRef)> {
     let heap_ref = *value.as_heap_ref()?;
     let class = state.get_heap_value_mut(heap_ref).as_class_mut()?;
     Some((class, heap_ref))
@@ -805,10 +775,7 @@ fn try_load_instance<'a>(state: &'a State, value: &'_ Value) -> Option<(&'a Inst
     Some((instance, heap_ref))
 }
 
-fn try_load_instance_mut<'a>(
-    state: &'a mut State,
-    value: &'_ Value,
-) -> Option<(&'a mut Instance, HeapRef)> {
+fn try_load_instance_mut<'a>(state: &'a mut State, value: &'_ Value) -> Option<(&'a mut Instance, HeapRef)> {
     let heap_ref = *value.as_heap_ref()?;
     let instance = state.get_heap_value_mut(heap_ref).as_instance_mut()?;
     Some((instance, heap_ref))
@@ -825,7 +792,10 @@ fn load_class_for_instance<'a>(state: &'a State, instance: &'_ Instance) -> &'a 
         class
     } else {
         // an instance should always point to a valid class, anything else would indicate a bug around instance creation or VM corruption
-        panic!("Error loading class type {} for instance: The value at heap location {} is not a class.", instance.debug_class_name, instance.class);
+        panic!(
+            "Error loading class type {} for instance: The value at heap location {} is not a class.",
+            instance.debug_class_name, instance.class
+        );
     }
 }
 

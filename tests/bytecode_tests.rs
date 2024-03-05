@@ -659,9 +659,7 @@ fn invalid_this_expression() -> TestResult {
         let code = "print this;";
         let result = run(code);
         let error = result.unwrap_err();
-        assert!(error
-            .description
-            .contains("Can't use 'this' outside of a class"));
+        assert!(error.description.contains("Can't use 'this' outside of a class"));
     }
     {
         let code = "\
@@ -670,9 +668,7 @@ fn invalid_this_expression() -> TestResult {
             }";
         let result = run(code);
         let error = result.unwrap_err();
-        assert!(error
-            .description
-            .contains("Can't use 'this' outside of a class"));
+        assert!(error.description.contains("Can't use 'this' outside of a class"));
     }
     Ok(())
 }
@@ -765,9 +761,9 @@ fn type_init_argument_count() -> TestResult {
             var instance = NoInit(1);";
         let result = run(code);
         let error = result.unwrap_err();
-        assert!(error.description.contains(
-            "Unexpected arguments to initializer for class NoInit that has no init() method"
-        ));
+        assert!(error
+            .description
+            .contains("Unexpected arguments to initializer for class NoInit that has no init() method"));
     }
     Ok(())
 }
@@ -782,9 +778,7 @@ fn type_init_invalid_return() -> TestResult {
             }";
     let result = run(code);
     let error = result.unwrap_err();
-    assert!(error
-        .description
-        .contains("Can't return a value from an initializer"));
+    assert!(error.description.contains("Can't return a value from an initializer"));
     Ok(())
 }
 
@@ -805,10 +799,7 @@ fn bound_method_invocation() -> TestResult {
         boundMethod();";
 
     let output = run(code)?;
-    assert_eq!(
-        "Boom!\n",
-        output
-    );
+    assert_eq!("Boom!\n", output);
     Ok(())
 }
 
@@ -840,10 +831,7 @@ fn method_invocation_optimization() -> TestResult {
         boom.countdown(5);";
 
     let output = run(code)?;
-    assert_eq!(
-        "5\n4\n3\n2\n1\nBoom!\n5\n4\n3\n2\n1\n0\nSurprise!\n",
-        output
-    );
+    assert_eq!("5\n4\n3\n2\n1\nBoom!\n5\n4\n3\n2\n1\n0\nSurprise!\n", output);
     Ok(())
 }
 
@@ -972,7 +960,10 @@ fn capture_super_upvalue_multiple_times() -> TestResult {
         }";
 
     let output = run(code)?;
-    assert_eq!("my interesting information\nextra field stuff\n10\nextra field stuff\n", output);
+    assert_eq!(
+        "my interesting information\nextra field stuff\n10\nextra field stuff\n",
+        output
+    );
     Ok(())
 }
 

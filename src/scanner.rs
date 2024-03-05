@@ -53,12 +53,7 @@ impl Token {
         }
     }
 
-    fn with_value(
-        token_type: TokenType,
-        lexeme: String,
-        line: u32,
-        token_value: TokenValue,
-    ) -> Self {
+    fn with_value(token_type: TokenType, lexeme: String, line: u32, token_value: TokenValue) -> Self {
         Token {
             token_type,
             lexeme,
@@ -298,11 +293,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                     if cursor.buffer_next_if_match('"') {
                         // increment line count for any newline characters within the string but keep track of original line number
                         let starting_line = cursor.line;
-                        cursor.line += cursor
-                            .chars_at_cursor()
-                            .iter()
-                            .filter(|&c| *c == '\n')
-                            .count() as u32;
+                        cursor.line += cursor.chars_at_cursor().iter().filter(|&c| *c == '\n').count() as u32;
 
                         let quoted = cursor.string_at_cursor();
                         Ok(Token {
@@ -310,9 +301,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                             token_type: TokenType::String,
                             lexeme: quoted.clone(),
                             line: starting_line,
-                            token_value: Some(TokenValue::String(
-                                quoted[1..(quoted.len() - 1)].to_string(),
-                            )),
+                            token_value: Some(TokenValue::String(quoted[1..(quoted.len() - 1)].to_string())),
                         })
                     } else {
                         Err(build_error("Unterminated string.", cursor.line))
@@ -324,10 +313,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
                     } else if current.is_ascii_digit() {
                         scan_number(cursor)
                     } else {
-                        Err(build_error(
-                            &format!("Unexpected character '{current}'."),
-                            cursor.line,
-                        ))
+                        Err(build_error(&format!("Unexpected character '{current}'."), cursor.line))
                     }
                 }
             }
@@ -339,11 +325,7 @@ fn next_token(cursor: &mut Cursor) -> TokenResult {
 
 // creates a token without any TokenValue at the current cursor range
 fn token_at_cursor(cursor: &Cursor, token_type: TokenType) -> TokenResult {
-    Ok(Token::new(
-        token_type,
-        cursor.string_at_cursor(),
-        cursor.line,
-    ))
+    Ok(Token::new(token_type, cursor.string_at_cursor(), cursor.line))
 }
 
 fn scan_identifier(cursor: &mut Cursor) -> TokenResult {

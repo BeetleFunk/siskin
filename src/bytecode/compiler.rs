@@ -236,8 +236,7 @@ impl Compiler {
             let mut is_local = true;
             let func_stack_length = self.func_stack.len();
             for function in self.func_stack[(function_index + 1)..func_stack_length].iter_mut() {
-                parent_upvalue_index =
-                    Compiler::add_upvalue(function, is_local, parent_upvalue_index);
+                parent_upvalue_index = Compiler::add_upvalue(function, is_local, parent_upvalue_index);
                 // the first capture points to an enclosing function's local but all upvalues down the line will not
                 is_local = false;
             }
@@ -388,10 +387,7 @@ fn var_declaration(compiler: &mut Compiler) -> UnitResult {
         compiler.emit_op(OpCode::Nil);
     }
 
-    compiler.consume(
-        TokenType::Semicolon,
-        "Expect ';' after variable declaration.",
-    )?;
+    compiler.consume(TokenType::Semicolon, "Expect ';' after variable declaration.")?;
 
     if compiler.scope_depth == 0 {
         // for global vars, save the variable name as a string in the constant table
@@ -409,11 +405,7 @@ fn fun_declaration(compiler: &mut Compiler) -> UnitResult {
     let identifier = compiler
         .consume(TokenType::Identifier, "Expect function name.")?
         .clone();
-    function(
-        compiler,
-        identifier.extract_name().clone(),
-        FunctionType::FreeFunction,
-    )?;
+    function(compiler, identifier.extract_name().clone(), FunctionType::FreeFunction)?;
     define_variable_no_replace(compiler, identifier)?;
     Ok(())
 }
@@ -462,18 +454,13 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
         // the free function calling convention has the callee in local slot zero
         FunctionType::FreeFunction => compiler.add_local(name),
         // the class method and type init calling conventions have the object instance in local slot zero
-        FunctionType::ClassMethod | FunctionType::TypeInitializer => {
-            compiler.add_local(code::NAME_FOR_SELF.to_owned())
-        }
+        FunctionType::ClassMethod | FunctionType::TypeInitializer => compiler.add_local(code::NAME_FOR_SELF.to_owned()),
     }
 
     let arity = function_parameters(compiler)?;
     compiler.func_mut().definition.arity = arity;
 
-    compiler.consume(
-        TokenType::RightParen,
-        "Expect ')' after function parameters.",
-    )?;
+    compiler.consume(TokenType::RightParen, "Expect ')' after function parameters.")?;
     compiler.consume(TokenType::LeftBrace, "Expect '{' before function body.")?;
 
     block(compiler)?;
@@ -538,9 +525,7 @@ fn function_parameters(compiler: &mut Compiler) -> BasicResult<u8> {
 }
 
 fn class_declaration(compiler: &mut Compiler) -> UnitResult {
-    let identifier = compiler
-        .consume(TokenType::Identifier, "Expect class name.")?
-        .clone();
+    let identifier = compiler.consume(TokenType::Identifier, "Expect class name.")?.clone();
     let class_name_constant = compiler
         .chunk_mut()
         .add_constant(CompiledConstant::from(identifier.extract_name().clone()));
@@ -813,8 +798,7 @@ fn expression(compiler: &mut Compiler) -> UnitResult {
 fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
     compiler.parser.advance()?;
     let prefix_rule = get_rule(compiler.parser.previous.token_type).prefix;
-    let prefix_rule = prefix_rule
-        .ok_or_else(|| build_error("Expect expression.", compiler.parser.previous.line))?;
+    let prefix_rule = prefix_rule.ok_or_else(|| build_error("Expect expression.", compiler.parser.previous.line))?;
 
     // the target for assignment must be an expression with PREC_ASSIGNMENT or lower precedence
     let can_assign = precedence <= PREC_ASSIGNMENT;
@@ -828,10 +812,7 @@ fn parse_precedence(compiler: &mut Compiler, precedence: u32) -> UnitResult {
 
     // detected assignment but the target expression didn't consume the equal token, improve the error message for this invalid assignment
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
-        return Err(build_error(
-            "Invalid assignment target.",
-            compiler.parser.previous.line,
-        ));
+        return Err(build_error("Invalid assignment target.", compiler.parser.previous.line));
     }
 
     Ok(())
@@ -856,10 +837,7 @@ fn literal(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
         TokenType::Nil => compiler.emit_op(OpCode::Nil),
         TokenType::True => compiler.emit_op(OpCode::True),
         TokenType::False => compiler.emit_op(OpCode::False),
-        _ => panic!(
-            "Token at line {} is not a literal.",
-            compiler.parser.previous.line
-        ),
+        _ => panic!("Token at line {} is not a literal.", compiler.parser.previous.line),
     }
     Ok(())
 }
@@ -877,7 +855,10 @@ fn super_(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
         ));
     }
     compiler.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
-    let method_name = compiler.consume(TokenType::Identifier, "Expect superclass method name.")?.extract_name().clone();
+    let method_name = compiler
+        .consume(TokenType::Identifier, "Expect superclass method name.")?
+        .extract_name()
+        .clone();
     let method_name = compiler.chunk_mut().add_constant(CompiledConstant::from(method_name));
     load_named_variable(compiler, code::NAME_FOR_SELF);
     if compiler.advance_if_match(TokenType::LeftParen)? {
@@ -963,9 +944,7 @@ fn call(compiler: &mut Compiler, _can_assign: bool) -> UnitResult {
 fn dot(compiler: &mut Compiler, can_assign: bool) -> UnitResult {
     let identifier = compiler.consume(TokenType::Identifier, "Expect property name after '.'.")?;
     let property_name = identifier.extract_name().clone();
-    let property_name = compiler
-        .chunk_mut()
-        .add_constant(CompiledConstant::from(property_name));
+    let property_name = compiler.chunk_mut().add_constant(CompiledConstant::from(property_name));
 
     if can_assign && compiler.advance_if_match(TokenType::Equal)? {
         expression(compiler)?;

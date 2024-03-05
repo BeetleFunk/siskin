@@ -91,7 +91,7 @@ fn circular_references() -> TestResult {
 }
 
 #[test]
-fn relocated_heap_references() -> TestResult {    
+fn relocated_heap_references() -> TestResult {
     let code = "\
         class Node {
             init(value) {
@@ -161,7 +161,7 @@ fn relocated_heap_references() -> TestResult {
         print \"Read global1.value: \" + toString(global1.value);
         print \"Read global2.value: \" + toString(global2.value);
         print \"Read global3.value: \" + toString(global3.value);";
-    
+
     let output = run(code)?;
     let expected = "\
         Made a big list!\n\

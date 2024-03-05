@@ -52,9 +52,7 @@ fn native_sqrt(_heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
     if let Value::Number(value) = args[0] {
         Ok(Value::from(value.sqrt()))
     } else {
-        Err(BasicError::new(
-            "Expected number argument for sqrt function.",
-        ))
+        Err(BasicError::new("Expected number argument for sqrt function."))
     }
 }
 
@@ -65,17 +63,13 @@ fn native_to_string(heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
 fn native_sleep(_heap: &[HeapEntry], args: &[Value]) -> BasicResult<Value> {
     if let Value::Number(value) = args[0] {
         if value < 0.0 {
-            return Err(BasicError::new(
-                "Expected positive number argument for sleep function.",
-            ));
+            return Err(BasicError::new("Expected positive number argument for sleep function."));
         }
         let duration = Duration::from_millis(value as u64);
         thread::sleep(duration);
         Ok(Value::Nil)
     } else {
-        Err(BasicError::new(
-            "Expected number argument for sleep function.",
-        ))
+        Err(BasicError::new("Expected number argument for sleep function."))
     }
 }
 

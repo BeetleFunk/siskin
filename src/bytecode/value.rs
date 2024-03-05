@@ -51,9 +51,9 @@ impl From<&CompiledConstant> for Value {
             CompiledConstant::Bool(value) => Value::Bool(*value),
             CompiledConstant::Number(value) => Value::Number(*value),
             CompiledConstant::String(value) => Value::String(value.clone()),
-            CompiledConstant::Function(_) => panic!(
-                "Compiled function must go through CLOSURE instruction to create runtime value."
-            ),
+            CompiledConstant::Function(_) => {
+                panic!("Compiled function must go through CLOSURE instruction to create runtime value.")
+            }
         }
     }
 }
@@ -101,11 +101,7 @@ impl fmt::Display for HeapValue {
         match self {
             Self::Class(v) => write!(f, "{}", &v.name),
             Self::Instance(v) => write!(f, "{} instance", &v.debug_class_name),
-            Self::BoundMethod(v) => write!(
-                f,
-                "{} closure bound to instance at {}",
-                v.closure, v.instance
-            ),
+            Self::BoundMethod(v) => write!(f, "{} closure bound to instance at {}", v.closure, v.instance),
             Self::Closure(v) => write!(f, "{}", &v.function.name),
             Self::NativeFunction(v) => write!(f, "{}", &v.name),
         }
@@ -200,11 +196,7 @@ impl fmt::Debug for NativeFunction {
 impl Drop for Class {
     fn drop(&mut self) {
         if TRACE_VALUE_DROP {
-            println!(
-                "Dropping class {} with {} methods.",
-                self.name,
-                self.methods.len()
-            );
+            println!("Dropping class {} with {} methods.", self.name, self.methods.len());
         }
     }
 }

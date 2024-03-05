@@ -39,20 +39,14 @@ pub fn collect_garbage(state: &mut State) {
 }
 
 fn mark_reachable_heap(state: &State) {
-    let global_refs = state.globals.values().filter_map(|v| {
-        if let Value::HeapRef(loc) = v {
-            Some(*loc)
-        } else {
-            None
-        }
-    });
-    let stack_refs = state.value_stack.iter().filter_map(|v| {
-        if let Value::HeapRef(loc) = v {
-            Some(*loc)
-        } else {
-            None
-        }
-    });
+    let global_refs = state
+        .globals
+        .values()
+        .filter_map(|v| if let Value::HeapRef(loc) = v { Some(*loc) } else { None });
+    let stack_refs = state
+        .value_stack
+        .iter()
+        .filter_map(|v| if let Value::HeapRef(loc) = v { Some(*loc) } else { None });
     let call_stack_captured_refs = state.call_stack.iter().flat_map(|v| {
         v.closure.upvalues.iter().filter_map(|v| {
             if let Some(Value::HeapRef(loc)) = *v.closed.borrow() {
@@ -63,9 +57,7 @@ fn mark_reachable_heap(state: &State) {
         })
     });
 
-    let all_refs = global_refs
-        .chain(stack_refs)
-        .chain(call_stack_captured_refs);
+    let all_refs = global_refs.chain(stack_refs).chain(call_stack_captured_refs);
 
     for loc in all_refs {
         mark_heap_entry(&state.value_heap, loc);
@@ -82,23 +74,14 @@ fn mark_heap_entry(heap: &[HeapEntry], loc: HeapRef) {
 
     match &heap[loc.0].value {
         HeapValue::Class(class) => {
-            class
-                .methods
-                .values()
-                .for_each(|v| mark_heap_entry(heap, *v));
+            class.methods.values().for_each(|v| mark_heap_entry(heap, *v));
         }
         HeapValue::Instance(instance) => {
             mark_heap_entry(heap, instance.class);
             instance
                 .fields
                 .values()
-                .filter_map(|v| {
-                    if let Value::HeapRef(loc) = v {
-                        Some(loc)
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(|v| if let Value::HeapRef(loc) = v { Some(loc) } else { None })
                 .for_each(|loc| mark_heap_entry(heap, *loc));
         }
         HeapValue::BoundMethod(method) => {

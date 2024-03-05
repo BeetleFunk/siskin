@@ -92,12 +92,7 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> StatementRe
     Ok(())
 }
 
-fn function_statement(
-    name: &Token,
-    params: &[Token],
-    body: &Stmt,
-    env: &mut Environment,
-) -> StatementResult {
+fn function_statement(name: &Token, params: &[Token], body: &Stmt, env: &mut Environment) -> StatementResult {
     let captured_names = resolve_function_captures(params, body)?;
     let mut captured_vars: HashMap<String, Reference> = HashMap::new();
     for capture in captured_names {
@@ -144,8 +139,7 @@ fn if_statement(
 
 fn print_statement(expression: &Expr, env: &mut Environment) -> StatementResult {
     let result = evaluate(expression, env)?;
-    writeln!(env.output_writer, "{}", result)
-        .expect("Writing to program output should always succeed.");
+    writeln!(env.output_writer, "{}", result).expect("Writing to program output should always succeed.");
     Ok(())
 }
 
@@ -171,11 +165,7 @@ fn while_statement(condition: &Expr, body: &Stmt, env: &mut Environment) -> Stat
 fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
     match expression {
         Expr::Assign { name, value } => evaluate_assign(name, value, env),
-        Expr::Binary {
-            left,
-            operator,
-            right,
-        } => evaluate_binary(left, operator, right, env),
+        Expr::Binary { left, operator, right } => evaluate_binary(left, operator, right, env),
         Expr::Call {
             callee,
             paren,
@@ -183,11 +173,7 @@ fn evaluate(expression: &Expr, env: &mut Environment) -> ValueResult {
         } => evaluate_call(callee, paren, arguments, env),
         Expr::Grouping { expression } => evaluate_grouping(expression, env),
         Expr::Literal { value } => evaluate_literal(value),
-        Expr::Logical {
-            left,
-            operator,
-            right,
-        } => evaluate_logical(left, operator, right, env),
+        Expr::Logical { left, operator, right } => evaluate_logical(left, operator, right, env),
         Expr::Unary { operator, right } => evaluate_unary(operator, right, env),
         Expr::Variable { name } => evaluate_variable(name, env),
     }
@@ -200,28 +186,15 @@ fn evaluate_assign(name: &Token, value: &Expr, env: &mut Environment) -> ValueRe
     Ok(result)
 }
 
-fn evaluate_binary(
-    left: &Expr,
-    operator: &Token,
-    right: &Expr,
-    env: &mut Environment,
-) -> ValueResult {
+fn evaluate_binary(left: &Expr, operator: &Token, right: &Expr, env: &mut Environment) -> ValueResult {
     let left_evaluated = evaluate(left, env)?;
     let right_evaluated = evaluate(right, env)?;
 
     let evaluated = if is_numeric_binary_operation(&operator.token_type) {
-        let left_number = extract_number(&left_evaluated).ok_or_else(|| {
-            build_error(
-                "Cannot perform numeric operation on non-numeric value.",
-                operator.line,
-            )
-        })?;
-        let right_number = extract_number(&right_evaluated).ok_or_else(|| {
-            build_error(
-                "Cannot perform numeric operation on non-numeric value.",
-                operator.line,
-            )
-        })?;
+        let left_number = extract_number(&left_evaluated)
+            .ok_or_else(|| build_error("Cannot perform numeric operation on non-numeric value.", operator.line))?;
+        let right_number = extract_number(&right_evaluated)
+            .ok_or_else(|| build_error("Cannot perform numeric operation on non-numeric value.", operator.line))?;
 
         match operator.token_type {
             TokenType::Minus => LiteralValue::Number(left_number - right_number),
@@ -233,31 +206,20 @@ fn evaluate_binary(
             TokenType::Less => LiteralValue::Boolean(left_number < right_number),
             TokenType::LessEqual => LiteralValue::Boolean(left_number <= right_number),
             // unhandled case here indicates a bug in the parser or interpreter
-            _ => panic!(
-                "Unhandled binary numeric operation type: {:?}",
-                operator.token_type
-            ),
+            _ => panic!("Unhandled binary numeric operation type: {:?}", operator.token_type),
         }
     } else {
         match operator.token_type {
             TokenType::EqualEqual => LiteralValue::Boolean(left_evaluated == right_evaluated),
             TokenType::BangEqual => LiteralValue::Boolean(left_evaluated != right_evaluated),
             // unhandled case here indicates a bug in the parser or interpreter
-            _ => panic!(
-                "Unhandled binary non-numeric operation type: {:?}",
-                operator.token_type
-            ),
+            _ => panic!("Unhandled binary non-numeric operation type: {:?}", operator.token_type),
         }
     };
     Ok(SiskinValue::from(evaluated))
 }
 
-fn evaluate_call(
-    callee: &Expr,
-    paren: &Token,
-    arguments: &[Expr],
-    env: &mut Environment,
-) -> ValueResult {
+fn evaluate_call(callee: &Expr, paren: &Token, arguments: &[Expr], env: &mut Environment) -> ValueResult {
     let callee = evaluate(callee, env)?;
     let evaluated_args: Vec<ValueResult> = arguments.iter().map(|arg| evaluate(arg, env)).collect();
     let mut unwrapped_args = Vec::new();
@@ -311,12 +273,7 @@ fn evaluate_literal(value: &LiteralValue) -> ValueResult {
     Ok(SiskinValue::from(value.clone()))
 }
 
-fn evaluate_logical(
-    left: &Expr,
-    operator: &Token,
-    right: &Expr,
-    env: &mut Environment,
-) -> ValueResult {
+fn evaluate_logical(left: &Expr, operator: &Token, right: &Expr, env: &mut Environment) -> ValueResult {
     let left_evaluated = evaluate(left, env)?;
 
     // short circuit if possible
@@ -341,19 +298,12 @@ fn evaluate_unary(operator: &Token, right: &Expr, env: &mut Environment) -> Valu
     let evaluated = match operator.token_type {
         TokenType::Bang => LiteralValue::Boolean(!is_truthy(&operand)),
         TokenType::Minus => {
-            let original = extract_number(&operand).ok_or_else(|| {
-                build_error(
-                    "Cannot perform negation operation on non-numeric value.",
-                    operator.line,
-                )
-            })?;
+            let original = extract_number(&operand)
+                .ok_or_else(|| build_error("Cannot perform negation operation on non-numeric value.", operator.line))?;
             LiteralValue::Number(-original)
         }
         // unhandled case here indicates a bug in the parser or interpreter
-        _ => panic!(
-            "Unary expression not implemented in interpreter: {:?}",
-            operator
-        ),
+        _ => panic!("Unary expression not implemented in interpreter: {:?}", operator),
     };
     Ok(SiskinValue::from(evaluated))
 }
