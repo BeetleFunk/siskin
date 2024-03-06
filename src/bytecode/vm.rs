@@ -201,6 +201,8 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                     state.value_stack.push(Value::from(a + b));
                 } else if let (Value::String(a), Value::String(b)) = operands {
                     state.value_stack.push(Value::from(a + &b));
+                } else if let (Value::String(a), Value::Number(b)) = operands {
+                    state.value_stack.push(Value::from(format!("{a}{b}")));
                 } else {
                     return Err(build_error(
                         "Addition requires either numeric or string operands",
