@@ -18,23 +18,27 @@ pub fn collect_garbage(state: &mut State) {
     let new_heap_size = state.value_heap.len() - open_slots.len();
     let old_heap_size = state.value_heap.len();
 
-    // relocate any marked heap values past the new capacity and then trim to that capacity
-    let mut current_open_slot = 0;
+    // relocate any marked heap values beyond the desired capacity and then trim to that capacity
+    let mut open_slots_iter = open_slots.iter();
     let mut remapping = HashMap::new();
-    for index in new_heap_size..state.value_heap.len() {
-        if state.value_heap[index].marked.get() {
-            state.value_heap.swap(index, open_slots[current_open_slot]);
-            remapping.insert(index, open_slots[current_open_slot]);
-            current_open_slot += 1;
+    for original_slot in new_heap_size..state.value_heap.len() {
+        if state.value_heap[original_slot].marked.get() {
+            let new_slot = *open_slots_iter.next().unwrap();
+            state.value_heap.swap(original_slot, new_slot);
+            remapping.insert(original_slot, new_slot);
         }
     }
-
     state.value_heap.truncate(new_heap_size);
 
     remap_all_heap_refs(state, &remapping);
 
     if DEBUG_GC_TRACING {
-        println!("Marked {new_heap_size} out of {old_heap_size} entries and relocated {current_open_slot} entries");
+        println!(
+            "Marked {} out of {} entries and relocated {} entries",
+            new_heap_size,
+            old_heap_size,
+            remapping.len()
+        );
     }
 }
 
@@ -58,7 +62,6 @@ fn mark_reachable_heap(state: &State) {
     });
 
     let all_refs = global_refs.chain(stack_refs).chain(call_stack_captured_refs);
-
     for loc in all_refs {
         mark_heap_entry(&state.value_heap, loc);
     }
@@ -107,6 +110,7 @@ fn mark_heap_entry(heap: &[HeapEntry], loc: HeapRef) {
     }
 }
 
+// reset the marked state of each heap entry and perform applicable remapping for all heap references in the VM state
 fn remap_all_heap_refs(state: &mut State, remapping: &HashMap<usize, usize>) {
     for entry in &mut state.value_heap {
         entry.marked.set(false);

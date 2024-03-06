@@ -502,9 +502,6 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
                 call_value(state, Value::HeapRef(closure), arg_count)?;
             }
         }
-
-        // TODO: determine proper time to run this
-        gc::collect_garbage(state);
     }
 
     Ok(())
@@ -615,19 +612,23 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             }
             let args_begin = locals_base + 1;
             let args = &state.value_stack[args_begin..state.value_stack.len()];
-            // run the native function directly
+            // run the native function pointer, then pop the callable and the function arguments off the stack
             let result = (native_function.func)(&state.value_heap, args);
-            // pop the native function callable as well as all the function arguments
             state.value_stack.truncate(locals_base);
-
-            if let Err(e) = result {
-                return Err(build_error(
-                    &format!("Native function runtime error - {}", e.description),
+            let (return_value, flags) = result.map_err(|error| {
+                build_error(
+                    &format!("Native function runtime error - {}", error.description),
                     last_line_number(state),
-                ));
-            } else {
-                state.value_stack.push(result.unwrap());
+                )
+            })?;
+            // with the current code and borrow structure, native functions can't mutate VM state directly
+            // unusual functionality, like forcing garbage collection, relies on special flags in the result
+            if let Some(flags) = flags {
+                if flags.force_gc {
+                    gc::collect_garbage(state);
+                }
             }
+            state.value_stack.push(return_value);
         }
         HeapValue::Class(class) => {
             // automatically run a class's type initializer (init() method) if it exists

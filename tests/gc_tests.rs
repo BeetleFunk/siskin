@@ -63,8 +63,8 @@ fn circular_references() -> TestResult {
 
         {
             var outerList = List();
-            var numLists = 16; //var numLists = 1000;
-            var innerListSize = 16; //var innerListSize = 1000;
+            var numLists = 100;
+            var innerListSize = 100;
             for (var i = 0; i < numLists; i = i + 1) {
                 var innerList = List();
                 for (var j = 0; j < innerListSize; j = j + 1) {
@@ -72,20 +72,20 @@ fn circular_references() -> TestResult {
                 }
                 outerList.push(innerList);
             }
+            forceGC();
             print \"Made a big list!\";
-            print \"heap size: \" + toString(getNumHeapEntries());
-            sleep(1000);
+            print \"heap size: \" + getNumHeapEntries();
         }
+        forceGC();
         print \"List is now out of scope!\";
-        sleep(1000);
-        print \"heap size: \" + toString(getNumHeapEntries());";
+        print \"heap size: \" + getNumHeapEntries();";
 
     let output = run(code)?;
     let expected = "\
         Made a big list!\n\
-        heap size: 300\n\
+        heap size: 10213\n\
         List is now out of scope!\n\
-        heap size: 11\n";
+        heap size: 12\n";
     assert_eq!(expected, output);
     Ok(())
 }
@@ -142,8 +142,8 @@ fn relocated_heap_references() -> TestResult {
         var global3;
         {
             var outerList = List();
-            var numLists = 16;
-            var innerListSize = 8;
+            var numLists = 100;
+            var innerListSize = 100;
             for (var i = 0; i < numLists; i = i + 1) {
                 var innerList = List();
                 for (var j = 0; j < innerListSize; j = j + 1) {
@@ -151,13 +151,15 @@ fn relocated_heap_references() -> TestResult {
                 }
                 outerList.push(innerList);
             }
+            forceGC();
             print \"Made a big list!\";
-            print \"heap size: \" + toString(getNumHeapEntries());
+            print \"heap size: \" + getNumHeapEntries();
             global2 = Node(3);
             global3 = Node(5);
         }
+        forceGC();
         print \"List is now out of scope!\";
-        print \"heap size: \" + toString(getNumHeapEntries());
+        print \"heap size: \" + getNumHeapEntries();
         print \"Read global1.value: \" + toString(global1.value);
         print \"Read global2.value: \" + toString(global2.value);
         print \"Read global3.value: \" + toString(global3.value);";
@@ -165,9 +167,9 @@ fn relocated_heap_references() -> TestResult {
     let output = run(code)?;
     let expected = "\
         Made a big list!\n\
-        heap size: 173\n\
+        heap size: 10214\n\
         List is now out of scope!\n\
-        heap size: 14\n\
+        heap size: 15\n\
         Read global1.value: 1\n\
         Read global2.value: 3\n\
         Read global3.value: 5\n";
