@@ -29,7 +29,7 @@ fn main() -> error::GenericResult<()> {
 fn run_file(path: &str) -> error::GenericResult<()> {
     println!("Running file: {path}");
     let contents = fs::read_to_string(path)?;
-    bytecode::execute(&contents, &mut io::stdout().lock())?;
+    bytecode::interpret_ephemeral(&contents, &mut io::stdout().lock())?;
     Ok(())
 }
 
@@ -39,11 +39,12 @@ fn run_prompt() -> error::GenericResult<()> {
     let mut buffer = String::new();
     let stdin = io::stdin();
 
+    let mut vm_state = bytecode::create_vm();
     let mut output = io::stdout().lock();
 
     loop {
         stdin.read_line(&mut buffer)?;
-        let result = bytecode::execute(&buffer, &mut output);
+        let result = bytecode::interpret(&mut vm_state, &buffer, &mut output);
         if let Err(error) = result {
             println!("*** Encountered an error during execution ***");
             println!("{error}");
