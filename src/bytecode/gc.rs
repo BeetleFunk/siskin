@@ -6,6 +6,13 @@ use super::vm::State;
 
 const DEBUG_GC_TRACING: bool = false;
 
+const INITIAL_HEAP_CAPACITY: usize = 16 * 1024;
+const HEAP_GROW_FACTOR: usize = 2;
+
+pub fn reserve_new_heap() -> Vec<HeapEntry> {
+    Vec::with_capacity(INITIAL_HEAP_CAPACITY)
+}
+
 pub fn collect_garbage(state: &mut State) {
     mark_reachable_heap(state);
 
@@ -32,12 +39,21 @@ pub fn collect_garbage(state: &mut State) {
 
     remap_all_heap_refs(state, &remapping);
 
+    // reserve/shrink heap capacity if necessary, but don't shrink below INITIAL_HEAP_CAPACITY
+    let new_heap_capacity = std::cmp::max(HEAP_GROW_FACTOR * new_heap_size, INITIAL_HEAP_CAPACITY);
+    if new_heap_capacity > state.value_heap.capacity() {
+        state.value_heap.reserve(new_heap_capacity);
+    } else {
+        state.value_heap.shrink_to(new_heap_capacity);
+    }
+
     if DEBUG_GC_TRACING {
         println!(
-            "Marked {} out of {} entries and relocated {} entries",
+            "GC COMPLETE: Marked {} out of {} entries and relocated {} entries. Next GC at {} entries.",
             new_heap_size,
             old_heap_size,
-            remapping.len()
+            remapping.len(),
+            state.value_heap.capacity()
         );
     }
 }

@@ -34,7 +34,7 @@ impl State {
         let mut state = State {
             call_stack: vec![root_frame],
             value_stack: Vec::new(),
-            value_heap: Vec::new(),
+            value_heap: gc::reserve_new_heap(),
             globals: HashMap::new(),
             open_upvalues: Vec::new(),
         };
@@ -63,12 +63,24 @@ impl State {
         &mut self.value_heap[loc.0].value
     }
 
+    // adds a new heap entry and runs garbage collection if the heap is at capacity
     fn place_on_heap(&mut self, value: HeapValue) -> Value {
+        // push before running GC in case this new entry has refs to objects that would otherwise be freed
         self.value_heap.push(HeapEntry {
             value,
             marked: Cell::new(false),
         });
-        Value::from(HeapRef(self.value_heap.len() - 1))
+        let heap_ref = Value::from(HeapRef(self.value_heap.len() - 1));
+        // trigger GC before the Vec would need to reallocate
+        if self.value_heap.len() == self.value_heap.capacity() {
+            // put the HeapRef on the stack to keep GC from reclaiming the entry that was just added
+            // additionally, if GC relocates the entry it will automatically remap this HeapRef for us
+            self.value_stack.push(heap_ref);
+            gc::collect_garbage(self);
+            self.value_stack.pop().unwrap()
+        } else {
+            heap_ref
+        }
     }
 
     // the current call frame
