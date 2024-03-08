@@ -6,9 +6,8 @@ use std::rc::Rc;
 
 use enum_as_inner::EnumAsInner;
 
-use crate::error::BasicResult;
-
 use super::code::{CompiledConstant, CompiledFunction};
+use super::stdlib::NativeFnResult;
 
 const TRACE_VALUE_DROP: bool = false;
 
@@ -171,7 +170,7 @@ pub struct Upvalue {
 
 pub struct NativeFunction {
     pub arity: u8,
-    pub func: fn(heap: &[HeapEntry], arguments: &[Value]) -> BasicResult<Value>,
+    pub func: fn(heap: &[HeapEntry], arguments: &[Value]) -> NativeFnResult,
     pub name: String,
 }
 
