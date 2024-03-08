@@ -7,7 +7,7 @@ type TestResult = BasicResult<()>;
 // run siskin code using a fresh interpreter environment and return a string containing the program output
 fn run(code: &str) -> error::BasicResult<String> {
     let mut buffer = Vec::new();
-    bytecode::execute(code, &mut buffer)?;
+    bytecode::interpret_ephemeral(code, &mut buffer)?;
 
     let output = std::str::from_utf8(buffer.as_slice()).unwrap();
 

@@ -29,10 +29,16 @@ pub struct CallFrame {
     pub closure: Rc<Closure>,
 }
 
+impl Default for State {
+    fn default() -> Self {
+        State::new()
+    }
+}
+
 impl State {
-    pub fn new(root_frame: CallFrame) -> Self {
+    pub fn new() -> Self {
         let mut state = State {
-            call_stack: vec![root_frame],
+            call_stack: Vec::new(),
             value_stack: Vec::new(),
             value_heap: gc::reserve_new_heap(),
             globals: HashMap::new(),
@@ -104,22 +110,37 @@ fn setup_stdlib(state: &mut State) {
     }
 }
 
-pub fn interpret(compiled: CompiledFunction, output: &mut dyn Write) -> BasicResult<()> {
-    let mut vm_state = State::new(CallFrame {
+pub fn interpret(vm_state: &mut State, compiled: CompiledFunction, output: &mut dyn Write) -> BasicResult<()> {
+    // the virtual machine isn't reentrant and must not already be executing any functions or tracking call state
+    let clean_environment =
+        vm_state.call_stack.is_empty() && vm_state.value_stack.is_empty() && vm_state.open_upvalues.is_empty();
+    if !clean_environment {
+        panic!("vm::interpret was invoked for a VM that already had in-progress execution state.")
+    }
+
+    let root_function = CallFrame {
         ip: 0,
         locals_base: 0,
         closure: Rc::new(Closure {
             function: Rc::new(compiled),
             upvalues: Vec::new(),
         }),
-    });
-    let result = execute(&mut vm_state, output);
+    };
+    vm_state.call_stack.push(root_function);
+
+    let result = execute(vm_state, output);
 
     if let Err(ref e) = result {
         writeln!(output, " --- {}", e.description).expect("Output writer should succeed.");
-        print_stack_trace(&vm_state, output);
-    }
+        print_stack_trace(vm_state, output);
 
+        // clean up the execution state of the VM before returning the error
+        // TODO: Is there remaining state that needs to be captured after an error?
+        // TODO: Perhaps closing remaining upvalues since the call stack is effectively dead now?
+        vm_state.call_stack.clear();
+        vm_state.value_stack.clear();
+        vm_state.open_upvalues.clear();
+    }
     result
 }
 
