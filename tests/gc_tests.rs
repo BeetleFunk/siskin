@@ -10,6 +10,10 @@ const LINKED_LIST_DEFINITION: &str = "\
         init(value) {
             this.value = value;
         }
+
+        toString() {
+            return toString(this.value);
+        }
     }
 
     class LinkedList {
@@ -39,10 +43,10 @@ const LINKED_LIST_DEFINITION: &str = "\
             }
 
             var current = this.start;
-            var contents = \"[\" + toString(current.value);
+            var contents = \"[\" + current.toString();
             while (current.next != nil) {
                 current = current.next;
-                contents = contents + \", \" + toString(current.value);
+                contents = contents + \", \" + current.toString();
             }
             contents = contents + \"]\";
             return contents;
@@ -94,7 +98,7 @@ fn circular_references() -> TestResult {
 }
 
 #[test]
-fn relocated_heap_references() -> TestResult {
+fn refs_relocated_on_force_gc() -> TestResult {
     let code = "\
         var global1 = Node(1);
         var global2 = global1;
@@ -134,6 +138,51 @@ fn relocated_heap_references() -> TestResult {
         Read global1.value: 1\n\
         Read global2.value: 3\n\
         Read global3.value: 5\n";
+    assert_eq!(expected, output);
+    Ok(())
+}
+
+
+#[test]
+// a natural GC exercises the code path where a value has just been placed on the heap
+// that code path has some subtleties around avoiding reclamation and handling relocation of the new entry
+fn refs_relocated_on_natural_gc() -> TestResult {
+    let code = "\
+        {
+            var originalHeapSize = getNumHeapEntries();
+            var heapEntriesBeforeGC = computeNextGC() - originalHeapSize;
+            var dummyCount = heapEntriesBeforeGC - 2;
+            for (var i = 0; i < dummyCount; i = i + 1) {
+                var dummy = Node(99999);
+            }
+
+            // this shouldn't trigger GC yet
+            var keeper1 = Node(11);
+
+            // GC should occur right after this object is added
+            var previousHeapSize = getNumHeapEntries();
+            var keeper2 = Node(22);
+            if (getNumHeapEntries() < previousHeapSize) {
+                print \"GC occurred when expected\";
+            }
+
+            // add another after GC was completed
+            var keeper3 = Node(33);
+
+            // print the objects to confirm that references were relocated properly
+            print keeper1.toString() + keeper2.toString() + keeper3.toString();
+
+            // the 3 local objects should be the only additional entries on the heap
+            if (getNumHeapEntries() == (originalHeapSize + 3)) {
+                print \"Heap size matches expected\";
+            }
+        }";
+
+    let output = run(code)?;
+    let expected = "\
+        GC occurred when expected\n\
+        112233\n\
+        Heap size matches expected\n";
     assert_eq!(expected, output);
     Ok(())
 }

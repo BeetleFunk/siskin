@@ -10,11 +10,12 @@ use crate::error::{BasicError, BasicResult};
 static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
 
 // for stdlib functions like forceGC() that need special handling in the VM itself
-pub struct VirtualMachineFlags {
-    pub force_gc: bool,
+pub enum SpecialOperation {
+    ForceGC,
+    ComputeNextGC,
 }
 
-pub type NativeFnResult = BasicResult<(Value, Option<VirtualMachineFlags>)>;
+pub type NativeFnResult = BasicResult<(Value, Option<SpecialOperation>)>;
 
 impl From<Value> for NativeFnResult {
     fn from(value: Value) -> Self {
@@ -53,6 +54,11 @@ pub fn native_functions() -> Vec<NativeFunction> {
             arity: 0,
             func: force_gc,
             name: "forceGC".to_string(),
+        },
+        NativeFunction {
+            arity: 0,
+            func: compute_next_gc,
+            name: "computeNextGC".to_string(),
         },
     ]
 }
@@ -95,5 +101,10 @@ fn get_num_heap_entries(heap: &[HeapEntry], _args: &[Value]) -> NativeFnResult {
 }
 
 fn force_gc(_heap: &[HeapEntry], _args: &[Value]) -> NativeFnResult {
-    Ok((Value::Nil, Some(VirtualMachineFlags { force_gc: true })))
+    Ok((Value::Nil, Some(SpecialOperation::ForceGC)))
+}
+
+fn compute_next_gc(_heap: &[HeapEntry], _args: &[Value]) -> NativeFnResult {
+    // this operation type tells the VM to return the current heap capacity rather than the return value used here
+    Ok((Value::Nil, Some(SpecialOperation::ComputeNextGC)))
 }

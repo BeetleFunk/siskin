@@ -648,17 +648,18 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             // run the native function pointer, then pop the callable and the function arguments off the stack
             let result = (native_function.func)(&state.value_heap, args);
             state.value_stack.truncate(locals_base);
-            let (return_value, flags) = result.map_err(|error| {
+            let (mut return_value, special_op) = result.map_err(|error| {
                 build_error(
                     &format!("Native function runtime error - {}", error.description),
                     last_line_number(state),
                 )
             })?;
-            // with the current code and borrow structure, native functions can't mutate VM state directly
-            // unusual functionality, like forcing garbage collection, relies on special flags in the result
-            if let Some(flags) = flags {
-                if flags.force_gc {
-                    gc::collect_garbage(state);
+            // With the current code and borrow structure, native functions can't mutate VM state directly.
+            // Unusual functionality, like forcing garbage collection, relies on special flags in the result.
+            if let Some(special_op) = special_op {
+                match special_op {
+                    stdlib::SpecialOperation::ForceGC => gc::collect_garbage(state),
+                    stdlib::SpecialOperation::ComputeNextGC => return_value = Value::Number(state.value_heap.capacity() as f64),
                 }
             }
             state.value_stack.push(return_value);
