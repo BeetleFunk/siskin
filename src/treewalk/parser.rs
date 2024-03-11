@@ -402,7 +402,8 @@ fn primary(cursor: &mut TokenCursor) -> ExprResult {
     match current.token_type {
         TokenType::False | TokenType::True | TokenType::Nil | TokenType::Number | TokenType::String => {
             let literal = Expr::Literal {
-                value: LiteralValue::from(current),
+                value: LiteralValue::try_from(current)
+                    .expect("Conversion into LiteralValue after checking for literal TokenType should always succeed."),
             };
             cursor.advance();
             Ok(literal)

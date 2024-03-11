@@ -62,16 +62,16 @@ impl fmt::Display for LiteralValue {
     }
 }
 
-// TODO: switch to TryFrom with proper error handling
-impl From<&Token> for LiteralValue {
-    fn from(token: &Token) -> LiteralValue {
-        match &token.token_type {
-            TokenType::False => LiteralValue::Boolean(false),
-            TokenType::True => LiteralValue::Boolean(true),
-            TokenType::Nil => LiteralValue::Nil,
-            TokenType::Number => LiteralValue::Number(token.extract_number()),
-            TokenType::String => LiteralValue::String(token.extract_string().clone()),
-            _ => panic!("Cannot make literal value from non-literal token"),
+impl TryFrom<&Token> for LiteralValue {
+    type Error = &'static str;
+    fn try_from(token: &Token) -> Result<Self, Self::Error> {
+        match token.token_type {
+            TokenType::False => Ok(LiteralValue::Boolean(false)),
+            TokenType::True => Ok(LiteralValue::Boolean(true)),
+            TokenType::Nil => Ok(LiteralValue::Nil),
+            TokenType::Number => Ok(LiteralValue::Number(token.extract_number())),
+            TokenType::String => Ok(LiteralValue::String(token.extract_string().clone())),
+            _ => Err("A trivial conversion into LiteralValue is not implemented for this type of Token."),
         }
     }
 }
