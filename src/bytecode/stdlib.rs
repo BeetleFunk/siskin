@@ -1,13 +1,11 @@
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
-
-use once_cell::sync::Lazy;
 
 use super::value::{HeapEntry, NativeFunction, Value};
 use crate::error::{BasicError, BasicResult};
 
-// TODO: make this thread local and avoid requirement on sync?
-static EPOCH: Lazy<Instant> = Lazy::new(Instant::now);
+static EPOCH: OnceLock<Instant> = OnceLock::new();
 
 // for stdlib functions like forceGC() that need special handling in the VM itself
 pub enum SpecialOperation {
@@ -64,10 +62,10 @@ pub fn native_functions() -> Vec<NativeFunction> {
 }
 
 fn clock(_heap: &[HeapEntry], _args: &[Value]) -> NativeFnResult {
-    // make sure epoch is initialized first (lazy init)
-    let epoch = *EPOCH;
+    // lazy init epoch on the first invocation
+    let epoch = *EPOCH.get_or_init(Instant::now);
     let duration = Instant::now() - epoch;
-    // lossy conversion to f64 here, shouldn't be an issue for a while though
+    // lossy conversion to f64 here - millisecond precision may suffer once the program has been running for many millenia!
     Value::Number(duration.as_millis() as f64).into()
 }
 
