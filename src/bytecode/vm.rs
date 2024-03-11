@@ -127,16 +127,23 @@ pub fn interpret(vm_state: &mut State, compiled: CompiledFunction, output: &mut 
 
     let result = execute(vm_state, output);
 
-    if let Err(ref e) = result {
+    if let Err(e) = &result {
         writeln!(output, " --- {}", e.description).expect("Output writer should succeed.");
         print_stack_trace(vm_state, output);
 
-        // clean up the execution state of the VM before returning the error
-        // TODO: Is there remaining state that needs to be captured after an error?
-        // TODO: Perhaps closing remaining upvalues since the call stack is effectively dead now?
-        vm_state.call_stack.clear();
-        vm_state.value_stack.clear();
-        vm_state.open_upvalues.clear();
+        // Global variables are preserved in the VM after an error and these variables may reference currently open upvalues.
+        // Clean up the execution state of the VM and ensure that all upvalues are closed at this time.
+        while !vm_state.call_stack.is_empty() {
+            pop_call_frame(vm_state);
+        }
+        // Check that the VM execution state is actually clear now. Bugs in cleanup routine would be particularly nasty to troubleshoot.
+        let clean_environment =
+            vm_state.call_stack.is_empty() && vm_state.value_stack.is_empty() && vm_state.open_upvalues.is_empty();
+        if !clean_environment {
+            panic!(
+                "On handling a runtime error, the VM cleanup routine was unable to properly clear the execution state."
+            )
+        }
     }
     result
 }

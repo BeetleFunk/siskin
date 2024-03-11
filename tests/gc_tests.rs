@@ -3,7 +3,7 @@ use siskin::{bytecode, error};
 
 type TestResult = BasicResult<()>;
 
-// write the definition once since these classes are used in multiple garbage collection tests
+// these classes are reused across multiple garbage collection tests
 const LINKED_LIST_DEFINITION: &str = "\
     class Node {
         init(value) {

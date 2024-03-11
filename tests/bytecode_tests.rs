@@ -1038,3 +1038,72 @@ fn upvalues_captured_not_in_stack_order() -> TestResult {
     assert_eq!("3\n5\n6\n", output);
     Ok(())
 }
+
+#[test]
+fn upvalues_captured_on_execution_error() -> TestResult {
+    let mut vm_state = bytecode::create_vm();
+
+    // execute code that triggers an execution error while there's an open upvalue on the stack
+    {
+        let code = "\
+            var simpleGlobal = 1;
+            var globalClosure;
+            {
+                // make sure the upvalue index is well into the stack locals
+                var uselessData1 = 1;
+                var uselessData2 = 2;
+                var uselessData3 = 3;
+                var uselessData4 = 4;
+                var uselessData5 = 5;
+                var uselessData6 = 6;
+
+                var importantData = \"String captured for later use\"; // local to be captured as upvalue
+                fun getImportantData() {
+                    var prefix = \"Here's the data: \";
+                    return prefix + importantData;
+                }
+
+                print \"Setting both of the global variables.\";
+                simpleGlobal = 999;
+                globalClosure = getImportantData;
+
+                print \"The data printer function was stored in the global closure. Triggering execution error now.\";
+
+                // trigger an error so that the interpreter must clean up execution state, including value stack and upvalues
+                var a = 7 + explode;
+            }";
+        let mut buffer = Vec::new();
+        let result = bytecode::interpret(&mut vm_state, code, &mut buffer)
+            .expect_err("Test code should have resulted in an error.");
+        assert_eq!(
+            "Execution error at line 25: Undefined variable explode.",
+            result.description
+        );
+
+        let output = std::str::from_utf8(buffer.as_slice()).unwrap();
+        let expected = "\
+            Setting both of the global variables.\n\
+            The data printer function was stored in the global closure. Triggering execution error now.\n\
+            \x20--- Execution error at line 25: Undefined variable explode.\n\
+            \x20---   line 25 in script\n";
+        assert_eq!(expected, output);
+    }
+
+    // in the same vm, try to use the global variable that captured the upvalue before the error occurred
+    // the interpreter must make sure that global state is valid (i.e. open upvalues are closed before the stack entries are wiped)
+    {
+        let code = "\
+            print \"Value in simpleGlobal: \" + simpleGlobal;
+            print \"Result of globalClosure(): \" + globalClosure();";
+        let mut buffer = Vec::new();
+        bytecode::interpret(&mut vm_state, code, &mut buffer)?;
+        let output = std::str::from_utf8(buffer.as_slice()).unwrap();
+
+        let expected = "\
+            Value in simpleGlobal: 999\n\
+            Result of globalClosure(): Here's the data: String captured for later use\n";
+        assert_eq!(expected, output);
+    }
+
+    Ok(())
+}
