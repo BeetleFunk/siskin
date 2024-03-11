@@ -1,13 +1,11 @@
-use crate::error::BasicError;
-use crate::error::GenericResult;
-use crate::scanner::Token;
-
-use super::expr::LiteralValue;
-use super::stmt::Stmt;
-
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Write;
+
+use super::expr::LiteralValue;
+use super::stmt::Stmt;
+use crate::error::{BasicError, GenericResult};
+use crate::scanner::Token;
 
 static DIAGNOSTICS: bool = false;
 

@@ -1,5 +1,4 @@
-use siskin::error;
-use siskin::treewalk;
+use siskin::{error, treewalk};
 
 type TestResult = error::GenericResult<()>;
 

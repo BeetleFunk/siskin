@@ -1,12 +1,10 @@
 use std::collections::HashSet;
 use std::result;
 
+use super::expr::{Expr, LiteralValue};
+use super::stmt::Stmt;
 use crate::error::BasicError;
 use crate::scanner::Token;
-
-use super::expr::Expr;
-use super::expr::LiteralValue;
-use super::stmt::Stmt;
 
 type UnitResult = result::Result<(), BasicError>;
 

@@ -1,6 +1,5 @@
-use siskin::bytecode;
-use siskin::error;
 use siskin::error::BasicResult;
+use siskin::{bytecode, error};
 
 type TestResult = BasicResult<()>;
 

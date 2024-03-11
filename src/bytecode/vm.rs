@@ -1,15 +1,12 @@
-use std::cell::Cell;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
 
-use crate::error::{BasicError, BasicResult};
-
 use super::code::{self, CompiledConstant, CompiledFunction, OpCode};
-use super::gc;
-use super::stdlib;
 use super::value::{BoundMethod, Class, Closure, HeapEntry, HeapRef, HeapValue, Instance, Upvalue, Value};
+use super::{gc, stdlib};
+use crate::error::{BasicError, BasicResult};
 
 const DEBUG_TRACING: bool = false;
 
@@ -659,7 +656,9 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             if let Some(special_op) = special_op {
                 match special_op {
                     stdlib::SpecialOperation::ForceGC => gc::collect_garbage(state),
-                    stdlib::SpecialOperation::ComputeNextGC => return_value = Value::Number(state.value_heap.capacity() as f64),
+                    stdlib::SpecialOperation::ComputeNextGC => {
+                        return_value = Value::Number(state.value_heap.capacity() as f64)
+                    }
                 }
             }
             state.value_stack.push(return_value);

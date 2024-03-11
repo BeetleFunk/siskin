@@ -1,6 +1,5 @@
-use siskin::bytecode;
-use siskin::error;
 use siskin::error::BasicResult;
+use siskin::{bytecode, error};
 
 type TestResult = BasicResult<()>;
 
@@ -141,7 +140,6 @@ fn refs_relocated_on_force_gc() -> TestResult {
     assert_eq!(expected, output);
     Ok(())
 }
-
 
 #[test]
 // a natural GC exercises the code path where a value has just been placed on the heap

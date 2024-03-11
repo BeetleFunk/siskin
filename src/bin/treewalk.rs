@@ -1,11 +1,8 @@
-use siskin::error;
-use siskin::treewalk;
+use std::{env, fs, io};
+
 use siskin::treewalk::environment::Environment;
 use siskin::treewalk::ExecutionResult;
-
-use std::env;
-use std::fs;
-use std::io;
+use siskin::{error, treewalk};
 
 fn main() -> ExecutionResult {
     let mut args: Vec<String> = env::args().collect();

@@ -1,10 +1,8 @@
-use std::mem;
-use std::result;
-
-use crate::error::{BasicError, BasicResult};
-use crate::scanner::{Scanner, Token, TokenType};
+use std::{mem, result};
 
 use super::code::{self, Chunk, CompiledConstant, CompiledFunction, OpCode};
+use crate::error::{BasicError, BasicResult};
+use crate::scanner::{Scanner, Token, TokenType};
 
 type UnitResult = BasicResult<()>;
 

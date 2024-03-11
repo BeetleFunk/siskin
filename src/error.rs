@@ -1,6 +1,5 @@
 use std::error::Error;
-use std::fmt;
-use std::result;
+use std::{fmt, result};
 
 pub type GenericResult<T> = result::Result<T, Box<dyn Error>>;
 pub type BasicResult<T> = result::Result<T, BasicError>;

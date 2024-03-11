@@ -1,20 +1,13 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt;
-use std::result;
+use std::{fmt, result};
 
-use crate::error::BasicError;
-use crate::scanner::Token;
-use crate::scanner::TokenType;
-
-use super::environment::Environment;
-use super::environment::Reference;
-use super::environment::SiskinFunction;
-use super::environment::SiskinValue;
-use super::expr::Expr;
-use super::expr::LiteralValue;
-use super::resolver::resolve_function_captures;
+use super::environment::{Environment, Reference, SiskinFunction, SiskinValue};
+use super::expr::{Expr, LiteralValue};
+use super::resolver;
 use super::stmt::Stmt;
+use crate::error::BasicError;
+use crate::scanner::{Token, TokenType};
 
 type ValueResult = result::Result<SiskinValue, BasicError>;
 // Error result can be either an early return value or an interpreter error
@@ -93,7 +86,7 @@ fn expression_statement(expression: &Expr, env: &mut Environment) -> StatementRe
 }
 
 fn function_statement(name: &Token, params: &[Token], body: &Stmt, env: &mut Environment) -> StatementResult {
-    let captured_names = resolve_function_captures(params, body)?;
+    let captured_names = resolver::resolve_function_captures(params, body)?;
     let mut captured_vars: HashMap<String, Reference> = HashMap::new();
     for capture in captured_names {
         if let Some(reference) = env.get_reference(&capture.lexeme) {

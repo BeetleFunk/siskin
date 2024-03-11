@@ -1,7 +1,6 @@
-use crate::scanner::Token;
-use crate::scanner::TokenType;
-
 use std::fmt;
+
+use crate::scanner::{Token, TokenType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {

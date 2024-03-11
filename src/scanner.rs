@@ -1,6 +1,6 @@
-use crate::error::BasicError;
-
 use std::result;
+
+use crate::error::BasicError;
 
 type TokenResult = result::Result<Token, BasicError>;
 

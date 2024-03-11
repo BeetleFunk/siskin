@@ -1,9 +1,6 @@
-use siskin::bytecode;
-use siskin::error;
+use std::{env, fs, io};
 
-use std::env;
-use std::fs;
-use std::io;
+use siskin::{bytecode, error};
 
 fn main() -> error::GenericResult<()> {
     let mut args: Vec<String> = env::args().collect();

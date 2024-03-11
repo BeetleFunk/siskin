@@ -1,6 +1,5 @@
-use crate::scanner::Token;
-
 use super::expr::Expr;
+use crate::scanner::Token;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {

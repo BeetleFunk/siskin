@@ -1,11 +1,7 @@
-use crate::error::BasicError;
-use crate::error::GenericResult;
-use crate::scanner::Token;
-use crate::scanner::TokenType;
-
-use super::expr::Expr;
-use super::expr::LiteralValue;
+use super::expr::{Expr, LiteralValue};
 use super::stmt::Stmt;
+use crate::error::{BasicError, GenericResult};
+use crate::scanner::{Token, TokenType};
 
 type StmtResult = GenericResult<Stmt>;
 type ExprResult = GenericResult<Expr>;

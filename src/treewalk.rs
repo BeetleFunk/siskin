@@ -6,8 +6,7 @@ mod stmt;
 
 pub mod environment;
 
-use crate::error;
-use crate::scanner;
+use crate::{error, scanner};
 
 pub type ExecutionResult = error::GenericResult<()>;
 
