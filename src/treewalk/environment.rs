@@ -86,7 +86,7 @@ impl<'a> Environment<'a> {
         if object.ref_count == 1 {
             if DIAGNOSTICS {
                 writeln!(self.output_writer, "Removing object from heap: {}", reference.id)
-                    .expect("Writing to program output should always succeed.");
+                    .expect("Couldn't write to program output");
             }
 
             // remove the object first to take ownership and release the mutable borrow
@@ -107,7 +107,7 @@ impl<'a> Environment<'a> {
                     object.ref_count - 1,
                     reference.id
                 )
-                .expect("Writing to program output should always succeed.");
+                .expect("Couldn't write to program output");
             }
             object.ref_count -= 1;
         }
@@ -170,7 +170,7 @@ impl<'a> Environment<'a> {
         for (var_name, reference) in frame {
             if DIAGNOSTICS {
                 writeln!(self.output_writer, "Removing stack var: {}", var_name)
-                    .expect("Writing to program output should always succeed.");
+                    .expect("Couldn't write to program output");
             }
             self.decrement_refcount(&reference);
         }

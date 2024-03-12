@@ -1085,7 +1085,7 @@ fn upvalues_captured_on_execution_error() -> TestResult {
             Setting both of the global variables.\n\
             The data printer function was stored in the global closure. Triggering execution error now.\n\
             \x20--- Execution error at line 25: Undefined variable explode.\n\
-            \x20---   line 25 in script\n";
+            \x20---   line 25 in script\n\n";
         assert_eq!(expected, output);
     }
 

@@ -101,8 +101,6 @@ fn function_statement(name: &Token, params: &[Token], body: &Stmt, env: &mut Env
                 name.line,
             )));
         }
-
-        //writeln!(env.output_writer, "Captured var name: {}", capture.lexeme).expect("Writing to program output should always succeed.");
     }
 
     let function = SiskinFunction {
@@ -132,7 +130,7 @@ fn if_statement(
 
 fn print_statement(expression: &Expr, env: &mut Environment) -> StatementResult {
     let result = evaluate(expression, env)?;
-    writeln!(env.output_writer, "{}", result).expect("Writing to program output should always succeed.");
+    writeln!(env.output_writer, "{result}").expect("Couldn't write to program output");
     Ok(())
 }
 

@@ -128,7 +128,7 @@ pub fn interpret(vm_state: &mut State, compiled: CompiledFunction, output: &mut 
     let result = execute(vm_state, output);
 
     if let Err(e) = &result {
-        writeln!(output, " --- {}", e.description).expect("Output writer should succeed.");
+        writeln!(output, " --- {e}").expect("Couldn't write to program output");
         print_stack_trace(vm_state, output);
 
         // Global variables are preserved in the VM after an error and these variables may reference currently open upvalues.
@@ -156,8 +156,9 @@ fn print_stack_trace(state: &State, output: &mut dyn Write) {
         } else {
             &frame.closure.function.name
         };
-        writeln!(output, " ---   line {line} in {name}").expect("Output writer should succeed.");
+        writeln!(output, " ---   line {line} in {name}").expect("Couldn't write to program output");
     }
+    writeln!(output).expect("Couldn't write to program output");
 }
 
 fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
@@ -285,7 +286,7 @@ fn execute(state: &mut State, output: &mut dyn Write) -> BasicResult<()> {
             OpCode::False => state.value_stack.push(Value::Bool(false)),
             OpCode::Print => {
                 let printed = state.value_stack.pop().unwrap().to_string(&state.value_heap);
-                writeln!(output, "{}", printed).expect("Output writer should succeed.");
+                writeln!(output, "{}", printed).expect("Couldn't write to program output");
             }
             OpCode::Pop => {
                 state.value_stack.pop();
@@ -654,7 +655,7 @@ fn call_value(state: &mut State, callee: Value, arg_count: u8) -> BasicResult<()
             state.value_stack.truncate(locals_base);
             let (mut return_value, special_op) = result.map_err(|error| {
                 build_error(
-                    &format!("Native function runtime error - {}", error.description),
+                    &format!("Native function runtime error - {error}"),
                     last_line_number(state),
                 )
             })?;

@@ -1,52 +1,51 @@
 use std::{env, fs, io};
 
-use siskin::{bytecode, error};
+use siskin::bytecode;
+use siskin::error::{self, BasicError};
 
 fn main() -> error::GenericResult<()> {
-    let mut args: Vec<String> = env::args().collect();
-    println!("{:?}", args);
+    let mut args = env::args();
+    args.next()
+        .expect("Program arguments should have at least one entry (typically the path of executable by default)");
 
-    // hack for running with cargo (or debugger) default args
-    args.remove(0);
-    // if args.len() >= 1 && args[0] == "target/debug/siskin" {
-    //     args.remove(0);
-    // }
-
-    #[allow(clippy::comparison_chain)]
     if args.len() > 1 {
-        println!("Usage: siskin [script]");
+        println!("Usage: bytecode [SCRIPT_PATH]");
         Err(Box::new(error::BasicError::new("Too many input arguments")))
-    } else if args.len() == 1 {
-        run_file(&args[0])
+    } else if let Some(path) = args.next() {
+        run_file(&path)
     } else {
         run_prompt()
     }
 }
 
 fn run_file(path: &str) -> error::GenericResult<()> {
-    println!("Running file: {path}");
+    println!("Running script from file at '{path}'");
     let contents = fs::read_to_string(path)?;
-    bytecode::interpret_ephemeral(&contents, &mut io::stdout().lock())?;
-    Ok(())
+    let result = bytecode::interpret_ephemeral(&contents, &mut io::stdout().lock());
+    if let Err(error) = &result {
+        display_error(error);
+    }
+    Ok(result?)
 }
 
 fn run_prompt() -> error::GenericResult<()> {
-    println!("Welcome to interactive prompt.");
+    println!("Welcome to the interactive prompt for the Siskin interpreter (bytecode variant).\n");
 
-    let mut buffer = String::new();
     let stdin = io::stdin();
-
     let mut vm_state = bytecode::create_vm();
     let mut output = io::stdout().lock();
-
+    let mut buffer = String::new();
     loop {
         stdin.read_line(&mut buffer)?;
         let result = bytecode::interpret(&mut vm_state, &buffer, &mut output);
-        if let Err(error) = result {
-            println!("*** Encountered an error during execution ***");
-            println!("{error}");
-            println!();
+        if let Err(error) = &result {
+            display_error(error);
         }
         buffer.clear();
     }
+}
+
+fn display_error(error: &BasicError) {
+    println!(" *** An error occurred while running the script ***");
+    println!("   {error}\n");
 }
