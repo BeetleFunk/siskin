@@ -1,7 +1,7 @@
 # Siskin - A Lox Interpreter Implemented in Rust
 Inspired by Robert Nystrom's book, [_Crafting Interpreters_](https://craftinginterpreters.com/).
 
-This project began as a way to learn Rust and explore the programming language topics covered in _Crafting Interpreters_. The book walks the reader through the creation of both a tree-walk interpreter implemented in Java (jlox) and a bytecode virtual machine implemented in C (clox). Lox is the name given to the scripting language that runs on these interpreters.
+This project began as a way to learn Rust and explore the programming language topics covered in _Crafting Interpreters_. The book walks the reader through the creation of both a tree-walk interpreter implemented in Java (jlox) and a bytecode virtual machine implemented in C (clox). Lox is the name given to the scripting language that runs on these interpreters. The Lox grammar is described [here](https://craftinginterpreters.com/appendix-i.html).
 
 My implementation here diverges from the exact design in the book because I wanted to better understand Rust's strengths and the tradeoffs compared to other languages. The jlox interpreter makes use of Java's garbage collector and object oriented programming techniques like inheritance, both of which are unavailable in Rust. The clox interpreter relies on sharing raw pointers and mutating memory in a way that is not compatible with the ownership and borrowing rules of safe Rust. Solving these design challenges was part of the learning experience.
 
