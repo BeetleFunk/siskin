@@ -1,7 +1,7 @@
 # Siskin - A Lox Interpreter Implemented in Rust
-Inspired by Robert Nystrom's book, [Crafting Interpreters](https://craftinginterpreters.com/).
+Inspired by Robert Nystrom's book, [_Crafting Interpreters_](https://craftinginterpreters.com/).
 
-This project began as a way to learn Rust and explore programming language topics covered in Crafting Interpreters. The book walks the reader through the creation of both a tree-walk interpreter implemented in Java (jlox) and a bytecode virtual machine implemented in C (clox). The scripting language being compiled and executed is called Lox.
+This project began as a way to learn Rust and explore the programming language topics covered in _Crafting Interpreters_. The book walks the reader through the creation of both a tree-walk interpreter implemented in Java (jlox) and a bytecode virtual machine implemented in C (clox). Lox is the name given to the scripting language that runs on these interpreters.
 
 My implementation here diverges from the exact design in the book because I wanted to better understand Rust's strengths and the tradeoffs compared to other languages. The jlox interpreter makes use of Java's garbage collector and object oriented programming techniques like inheritance, both of which are unavailable in Rust. The clox interpreter relies on sharing raw pointers and mutating memory in a way that is not compatible with the ownership and borrowing rules of safe Rust. Solving these design challenges was part of the learning experience.
 
@@ -28,9 +28,9 @@ cargo run --bin treewalk (SCRIPT_FILE)
 ## Testing
 Automated testing is accomplished with a suite of integration tests that execute scripts on the interpreter and confirm that program output matches expected patterns.
 
-There are separate tests for each interpreter variant as well as tests for the garbage collection subsystem of the bytecode virtual machine. All integration tests are located in the `tests` directory. These test suite covers basic language features, runtime error reporting, and more complex scenarios such as deeply nested function variable captures (upvalues).
+There are separate tests for each interpreter variant as well as tests for the garbage collection subsystem of the bytecode virtual machine. All integration tests are located in the `tests` directory. The test suite covers basic language features, runtime error reporting, and more complex scenarios such as deeply nested function variable captures (upvalues).
 
-Use `cargo test` to run the entire test suite.
+Use `cargo test` to run all of the tests.
 
 ## Code Formatting
 Code formatting uses Rustfmt and is configured in `rustfmt.toml`.
