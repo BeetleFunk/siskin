@@ -155,11 +155,13 @@ impl Compiler {
         self.scope_depth += 1;
     }
 
-    fn end_scope_no_emit(&mut self) {
+    // used at the end of a function body scope since the return instruction is guaranteed to pop all locals
+    fn end_scope_no_pop(&mut self) {
         self.scope_depth -= 1;
     }
 
-    fn end_scope(&mut self) {
+    // used at the end of standard scope blocks where the compiler is responsible for tracking and popping locals
+    fn end_scope_pop_locals(&mut self) {
         self.scope_depth -= 1;
 
         while let Some(last) = self.func().locals.last() {
@@ -434,6 +436,8 @@ fn define_variable_no_replace(compiler: &mut Compiler, identifier: Token) -> Uni
 fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) -> UnitResult {
     compiler.consume(TokenType::LeftParen, "Expect '(' after function name.")?;
 
+    // The function entry must be created before adding locals, but arity isn't known until the parameter names are added as locals.
+    // The solution for now is to rewrite this arity value later once the function parameters have been parsed.
     compiler.func_stack.push(CompilerFunction {
         definition: CompiledFunction {
             arity: 0,
@@ -455,6 +459,7 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
         FunctionType::ClassMethod | FunctionType::TypeInitializer => compiler.add_local(code::NAME_FOR_SELF.to_owned()),
     }
 
+    // bring parameter names into the current scope and save the actual arity value
     let arity = function_parameters(compiler)?;
     compiler.func_mut().definition.arity = arity;
 
@@ -464,8 +469,7 @@ fn function(compiler: &mut Compiler, name: String, function_type: FunctionType) 
     block(compiler)?;
     emit_empty_return(compiler);
 
-    // TODO: figure out a cleaner way to do this, don't need to clean up function locals (return does that) but do need to reset scope depth
-    compiler.end_scope_no_emit();
+    compiler.end_scope_no_pop();
 
     // pop the function that was just compiled and add it as a constant to the chunk of the parent function
     let compiled_func = compiler.func_stack.pop().unwrap();
@@ -569,7 +573,7 @@ fn class_declaration(compiler: &mut Compiler) -> UnitResult {
     compiler.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
     let finished_class = compiler.class_stack.pop().unwrap();
     if finished_class.has_superclass {
-        compiler.end_scope();
+        compiler.end_scope_pop_locals();
     }
 
     Ok(())
@@ -602,7 +606,7 @@ fn statement(compiler: &mut Compiler) -> UnitResult {
     if compiler.advance_if_match(TokenType::LeftBrace)? {
         compiler.begin_scope();
         let result = block(compiler);
-        compiler.end_scope();
+        compiler.end_scope_pop_locals();
         result
     } else if compiler.advance_if_match(TokenType::If)? {
         if_statement(compiler)
@@ -743,7 +747,7 @@ fn for_statement(compiler: &mut Compiler) -> UnitResult {
         compiler.emit_op(OpCode::Pop);
     }
 
-    compiler.end_scope();
+    compiler.end_scope_pop_locals();
 
     Ok(())
 }
